@@ -1,0 +1,245 @@
+<?php
+session_start();
+if (!isset($_SESSION['id_utilisateur'])) {
+    header("Location: ../auth/auth.php");
+    exit();
+}
+
+include('../../config/db_conn.php');
+$message = "";
+
+// --- AJOUTER UNE VENTE ---
+if (isset($_POST['ajouter'])) {
+    $id_client = $_POST['id_client'] !== "" ? intval($_POST['id_client']) : "NULL";
+    $id_utilisateur = $_SESSION['id_utilisateur'];
+    $produits = $_POST['produit_id'];
+    $quantites = $_POST['quantite'];
+    $totaux = $_POST['prix_total'];
+    $total_general = 0;
+
+    // Validation du stock côté serveur
+    $stock_ok = true;
+    $erreurs_stock = [];
+
+    for ($i = 0; $i < count($produits); $i++) {
+        $id_produit = intval($produits[$i]);
+        $qte = intval($quantites[$i]);
+        if ($id_produit > 0 && $qte > 0) {
+            $req = mysqli_query($conn, "SELECT nom, quantite_stock FROM produits WHERE id = $id_produit");
+            $p = mysqli_fetch_assoc($req);
+            if ($qte > $p['quantite_stock']) {
+                $stock_ok = false;
+                $erreurs_stock[] = "❌ Le produit <strong>" . htmlspecialchars($p['nom']) . "</strong> n’a que <strong>" . $p['quantite_stock'] . "</strong> unités en stock.";
+            }
+        }
+    }
+
+    if (!$stock_ok) {
+        $message = implode("<br>", $erreurs_stock);
+    } else {
+        foreach ($totaux as $t) $total_general += floatval($t);
+
+        $sql_vente = "INSERT INTO ventes (id_client, id_utilisateur, total) VALUES ($id_client, $id_utilisateur, $total_general)";
+        if (mysqli_query($conn, $sql_vente)) {
+            $id_vente = mysqli_insert_id($conn);
+
+            for ($i = 0; $i < count($produits); $i++) {
+                $id_produit = intval($produits[$i]);
+                $qte = intval($quantites[$i]);
+                if ($qte > 0 && $id_produit > 0) {
+                    $req_p = mysqli_query($conn, "SELECT prix_vente, quantite_stock FROM produits WHERE id = $id_produit");
+                    $p = mysqli_fetch_assoc($req_p);
+                    $prix_unitaire = $p['prix_vente'];
+                    $nouveau_stock = $p['quantite_stock'] - $qte;
+
+                    mysqli_query($conn, "INSERT INTO details_vente (id_vente, id_produit, quantite, prix_unitaire)
+                                         VALUES ($id_vente, $id_produit, $qte, $prix_unitaire)");
+                    mysqli_query($conn, "UPDATE produits SET quantite_stock = $nouveau_stock WHERE id = $id_produit");
+                }
+            }
+            $message = "✅ Vente enregistrée avec succès.";
+        } else {
+            $message = "❌ Erreur : " . mysqli_error($conn);
+        }
+    }
+}
+
+// --- SUPPRESSION D’UNE VENTE ---
+if (isset($_GET['supprimer'])) {
+    $id = intval($_GET['supprimer']);
+    mysqli_query($conn, "DELETE FROM ventes WHERE id = $id");
+    header("Location: ventes.php");
+    exit();
+}
+
+// --- RÉCUPÉRATION DES DONNÉES ---
+$ventes = mysqli_query($conn, "SELECT v.id, v.total, v.date_vente, c.nom AS client, u.nom AS vendeur
+                               FROM ventes v
+                               LEFT JOIN clients c ON v.id_client = c.id
+                               LEFT JOIN utilisateurs u ON v.id_utilisateur = u.id
+                               ORDER BY v.id DESC");
+$clients = mysqli_query($conn, "SELECT id, nom FROM clients ORDER BY nom ASC");
+$produits = mysqli_query($conn, "SELECT id, nom, prix_vente, quantite_stock FROM produits ORDER BY nom ASC");
+?>
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>💰 Gestion des ventes - Smart Stock</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="../../assets/css/styles_connected.css">
+
+<script>
+function updateTotal(row) {
+    let prix = parseFloat(row.querySelector('.prix').value);
+    let qte = parseInt(row.querySelector('.qte').value);
+    let stock = parseInt(row.querySelector('.qte').max);
+    if (qte > stock) {
+        alert("❌ Quantité demandée supérieure au stock disponible (" + stock + ").");
+        row.querySelector('.qte').value = stock;
+        qte = stock;
+    }
+    if (!isNaN(prix) && !isNaN(qte)) {
+        row.querySelector('.total').value = (prix * qte).toFixed(2);
+        updateGrandTotal();
+    }
+}
+function updateGrandTotal() {
+    let totaux = document.querySelectorAll('.total');
+    let somme = 0;
+    totaux.forEach(t => somme += parseFloat(t.value || 0));
+    document.getElementById('grand_total').innerText = somme.toFixed(2) + " €";
+}
+function ajouterLigne() {
+    const table = document.getElementById('table_produits');
+    const clone = table.rows[1].cloneNode(true);
+    clone.querySelectorAll('input').forEach(i => i.value = '');
+    clone.querySelector('select').selectedIndex = 0;
+    table.appendChild(clone);
+}
+function setPrixStock(select) {
+    const option = select.selectedOptions[0];
+    const prix = option.dataset.prix;
+    const stock = option.dataset.stock;
+    const row = select.closest('tr');
+    row.querySelector('.prix').value = prix;
+    const qteInput = row.querySelector('.qte');
+    qteInput.max = stock;
+    qteInput.placeholder = "max " + stock;
+    updateTotal(row);
+}
+</script>
+</head>
+<body>
+
+<header>
+    <nav class="navbar">
+        <div class="nav-left">
+            <a href="index.php" class="logo-link">
+                <img src="../../assets/images/logo_epicerie.png" alt="Logo" class="logo-navbar">
+            </a>
+            <a href="index.php" class="nav-link">Tableau de bord</a>
+            <a href="stock.php" class="nav-link">Stock</a>
+            <a href="ventes.php" class="nav-link">Ventes</a>
+            <a href="clients.php" class="nav-link">Clients</a>
+            <a href="commandes.php" class="nav-link">Commandes</a>
+            <a href="categories.php" class="nav-link">Catégories</a>
+        </div>
+        <a href="logout.php" class="logout">🚪 Déconnexion</a>
+    </nav>
+</header>
+
+<div class="main-container">
+    <div class="content-wrapper">
+    <h1>💰 Gestion des ventes</h1>
+
+        <?php if ($message): ?>
+            <div class="message <?= strpos($message, '✅') !== false ? 'success' : 'error' ?>">
+                <?= $message ?>
+            </div>
+        <?php endif; ?>
+
+    <h3>🧾 Nouvelle vente</h3>
+    <form method="POST">
+            <div class="form-group">
+        <label>Client :</label>
+        <select name="id_client">
+            <option value="">-- Aucun client --</option>
+            <?php while ($c = mysqli_fetch_assoc($clients)): ?>
+                <option value="<?= $c['id'] ?>"><?= htmlspecialchars($c['nom']) ?></option>
+            <?php endwhile; ?>
+        </select>
+            </div>
+
+        <table id="table_produits">
+                <thead>
+                    <tr>
+                        <th>Produit</th>
+                        <th>Prix (€)</th>
+                        <th>Quantité</th>
+                        <th>Total (€)</th>
+                    </tr>
+                </thead>
+                <tbody>
+            <tr>
+                <td>
+                            <select name="produit_id[]" onchange="setPrixStock(this)" style="width: 100%; padding: 10px; border-radius: 8px; border: 2px solid #e0e0e0;">
+                        <option value="">-- Sélectionner --</option>
+                        <?php
+                        mysqli_data_seek($produits, 0);
+                        while ($p = mysqli_fetch_assoc($produits)): ?>
+                            <option value="<?= $p['id'] ?>" data-prix="<?= $p['prix_vente'] ?>" data-stock="<?= $p['quantite_stock'] ?>">
+                                <?= htmlspecialchars($p['nom']) ?> (<?= $p['quantite_stock'] ?> en stock)
+                            </option>
+                        <?php endwhile; ?>
+                    </select>
+                </td>
+                        <td><input type="number" class="prix" name="prix_unitaire[]" readonly style="width: 100%;"></td>
+                        <td><input type="number" class="qte" name="quantite[]" min="1" oninput="updateTotal(this.closest('tr'))" style="width: 100%;"></td>
+                        <td><input type="number" class="total" name="prix_total[]" step="0.01" readonly style="width: 100%;"></td>
+            </tr>
+                </tbody>
+        </table>
+
+            <p style="margin-top: 15px;">
+                <button type="button" onclick="ajouterLigne()" class="btn btn-info">➕ Ajouter un produit</button>
+            </p>
+            <div style="text-align: right; font-weight: bold; font-size: 1.2em; margin: 20px 0; color: var(--primary-color);">
+                Total général : <span id="grand_total">0.00 €</span>
+            </div>
+            <button type="submit" name="ajouter" class="btn">✅ Enregistrer la vente</button>
+    </form>
+
+    <h3>📋 Liste des ventes</h3>
+    <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Client</th>
+                    <th>Vendeur</th>
+                    <th>Date</th>
+                    <th>Total (€)</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+        <?php while ($v = mysqli_fetch_assoc($ventes)): ?>
+        <tr>
+            <td><?= $v['id'] ?></td>
+            <td><?= htmlspecialchars($v['client'] ?? "N/A") ?></td>
+            <td><?= htmlspecialchars($v['vendeur'] ?? "N/A") ?></td>
+                    <td><?= date('d/m/Y H:i', strtotime($v['date_vente'])) ?></td>
+                    <td style="font-weight: bold; color: var(--success-color);"><?= number_format($v['total'], 2, ',', ' ') ?> €</td>
+            <td>
+                        <a href="detailVente.php?id=<?= $v['id'] ?>" class="btn btn-info btn-sm">🔍 Détails</a>
+                        <a href="?supprimer=<?= $v['id'] ?>" class="btn btn-danger btn-sm" onclick="return confirm('Êtes-vous sûr ?')">🗑️ Supprimer</a>
+            </td>
+        </tr>
+        <?php endwhile; ?>
+            </tbody>
+    </table>
+    </div>
+</div>
+
+</body>
+</html>

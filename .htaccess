@@ -1,0 +1,27 @@
+# Configuration Apache pour Smart Stock
+
+# Activer le moteur de réécriture
+RewriteEngine On
+
+# Rediriger vers index.php si le fichier n'existe pas
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^$ index.php [L]
+
+# Protection des fichiers sensibles
+<FilesMatch "\.(sql|md|log)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Protection des dossiers
+<IfModule mod_rewrite.c>
+    RewriteRule ^(config|includes|database|install)/ - [F,L]
+</IfModule>
+
+# Encodage UTF-8
+AddDefaultCharset UTF-8
+
+# Désactiver la liste des répertoires
+Options -Indexes
+

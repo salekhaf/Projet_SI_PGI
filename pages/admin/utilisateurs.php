@@ -1,0 +1,350 @@
+<?php
+session_start();
+if (!isset($_SESSION['id_utilisateur'])) {
+    header("Location: ../auth/auth.php");
+    exit();
+}
+
+include('../../config/db_conn.php');
+include('../../includes/historique_helper.php');
+include('../../includes/role_helper.php');
+include('../../includes/permissions_helper.php');
+
+$role = $_SESSION['role'];
+$id_utilisateur = $_SESSION['id_utilisateur'];
+$message = "";
+
+// Seuls les admins peuvent modifier, les responsables peuvent consulter
+$peut_modifier = ($role === 'admin');
+$peut_consulter = in_array($role, ['admin', 'responsable_approvisionnement']);
+
+if (!$peut_consulter) {
+    header("Location: ../dashboard/index.php");
+    exit();
+}
+
+// --- Recherche et filtrage ---
+$recherche = isset($_GET['recherche']) ? trim($_GET['recherche']) : '';
+$filtre_role = isset($_GET['role']) ? trim($_GET['role']) : '';
+
+// --- Changement de rôle (Admin uniquement) ---
+if ($peut_modifier && isset($_POST['changer_role'])) {
+    $id_cible = intval($_POST['id_utilisateur']);
+    $nouveau_role = trim($_POST['nouveau_role']);
+    $roles_autorises = ['admin', 'responsable_approvisionnement', 'vendeur', 'tresorier'];
+
+    if (in_array($nouveau_role, $roles_autorises)) {
+        // Vérifier si c'est le dernier admin
+        if ($nouveau_role !== 'admin') {
+            $check_admin = mysqli_query($conn, "SELECT COUNT(*) as total FROM utilisateurs WHERE role = 'admin'");
+            $nb_admins = mysqli_fetch_assoc($check_admin)['total'];
+            
+            // Vérifier si l'utilisateur cible est admin
+            $check_user = mysqli_prepare($conn, "SELECT role FROM utilisateurs WHERE id = ?");
+            mysqli_stmt_bind_param($check_user, "i", $id_cible);
+            mysqli_stmt_execute($check_user);
+            $result_user = mysqli_stmt_get_result($check_user);
+            $user_data = mysqli_fetch_assoc($result_user);
+            mysqli_stmt_close($check_user);
+            
+            if ($user_data['role'] === 'admin' && $nb_admins <= 1) {
+                $message = "⚠️ Impossible de retirer le rôle admin : c'est le dernier administrateur.";
+            } else {
+                // Récupérer l'ancien rôle pour l'historique
+                $stmt_old = mysqli_prepare($conn, "SELECT nom, role FROM utilisateurs WHERE id = ?");
+                mysqli_stmt_bind_param($stmt_old, "i", $id_cible);
+                mysqli_stmt_execute($stmt_old);
+                $result_old = mysqli_stmt_get_result($stmt_old);
+                $ancien = mysqli_fetch_assoc($result_old);
+                mysqli_stmt_close($stmt_old);
+                
+                // Mise à jour avec prepared statement
+                $stmt = mysqli_prepare($conn, "UPDATE utilisateurs SET role = ? WHERE id = ?");
+                mysqli_stmt_bind_param($stmt, "si", $nouveau_role, $id_cible);
+                
+                if (mysqli_stmt_execute($stmt)) {
+                    // Si le nouveau rôle est trésorier, accorder automatiquement l'accès à la trésorerie
+                    if ($nouveau_role === 'tresorier') {
+                        // Vérifier si la permission n'existe pas déjà
+                        if (!aPermission($conn, $id_cible, 'acces_tresorerie')) {
+                            ajouterPermission($conn, $id_cible, 'acces_tresorerie', $id_utilisateur, null);
+                        }
+                    } else {
+                        // Si le rôle change et n'est plus trésorier, retirer la permission (si elle existe)
+                        if ($ancien['role'] === 'tresorier' && aPermission($conn, $id_cible, 'acces_tresorerie')) {
+                            supprimerPermission($conn, $id_cible, 'acces_tresorerie');
+                        }
+                    }
+                    
+                    enregistrer_historique($conn, $id_utilisateur, 'modification', 'utilisateurs', $id_cible, 
+                        "Changement de rôle: {$ancien['nom']} ({$ancien['role']} → $nouveau_role)", 
+                        $ancien, ['role' => $nouveau_role]);
+                    $message = "✅ Rôle mis à jour avec succès pour {$ancien['nom']}.";
+                    if ($nouveau_role === 'tresorier') {
+                        $message .= " L'accès à la trésorerie a été accordé automatiquement.";
+                    }
+                } else {
+                    $message = "❌ Erreur SQL : " . mysqli_error($conn);
+                }
+                mysqli_stmt_close($stmt);
+            }
+        } else {
+            // Récupérer l'ancien rôle pour l'historique
+            $stmt_old = mysqli_prepare($conn, "SELECT nom, role FROM utilisateurs WHERE id = ?");
+            mysqli_stmt_bind_param($stmt_old, "i", $id_cible);
+            mysqli_stmt_execute($stmt_old);
+            $result_old = mysqli_stmt_get_result($stmt_old);
+            $ancien = mysqli_fetch_assoc($result_old);
+            mysqli_stmt_close($stmt_old);
+            
+            // Mise à jour avec prepared statement
+            $stmt = mysqli_prepare($conn, "UPDATE utilisateurs SET role = ? WHERE id = ?");
+            mysqli_stmt_bind_param($stmt, "si", $nouveau_role, $id_cible);
+            
+            if (mysqli_stmt_execute($stmt)) {
+                // Si le nouveau rôle est trésorier, accorder automatiquement l'accès à la trésorerie
+                if ($nouveau_role === 'tresorier') {
+                    // Vérifier si la permission n'existe pas déjà
+                    if (!aPermission($conn, $id_cible, 'acces_tresorerie')) {
+                        ajouterPermission($conn, $id_cible, 'acces_tresorerie', $id_utilisateur, null);
+                    }
+                } else {
+                    // Si le rôle change et n'est plus trésorier, retirer la permission (si elle existe)
+                    if ($ancien['role'] === 'tresorier' && aPermission($conn, $id_cible, 'acces_tresorerie')) {
+                        supprimerPermission($conn, $id_cible, 'acces_tresorerie');
+                    }
+                }
+                
+                enregistrer_historique($conn, $id_utilisateur, 'modification', 'utilisateurs', $id_cible, 
+                    "Changement de rôle: {$ancien['nom']} ({$ancien['role']} → $nouveau_role)", 
+                    $ancien, ['role' => $nouveau_role]);
+                $message = "✅ Rôle mis à jour avec succès pour {$ancien['nom']}.";
+                if ($nouveau_role === 'tresorier') {
+                    $message .= " L'accès à la trésorerie a été accordé automatiquement.";
+                }
+        } else {
+            $message = "❌ Erreur SQL : " . mysqli_error($conn);
+            }
+            mysqli_stmt_close($stmt);
+        }
+    } else {
+        $message = "⚠️ Rôle non autorisé.";
+    }
+}
+
+// --- Construction de la requête avec filtres ---
+$where_conditions = [];
+$params = [];
+$types = "";
+
+if (!empty($recherche)) {
+    $where_conditions[] = "(nom LIKE ? OR email LIKE ?)";
+    $recherche_param = "%$recherche%";
+    $params[] = $recherche_param;
+    $params[] = $recherche_param;
+    $types .= "ss";
+}
+
+if (!empty($filtre_role)) {
+    $where_conditions[] = "role = ?";
+    $params[] = $filtre_role;
+    $types .= "s";
+}
+
+// Si responsable, ne pas afficher les admins
+if ($role === 'responsable_approvisionnement') {
+    $where_conditions[] = "role != 'admin'";
+}
+
+$where_clause = !empty($where_conditions) ? "WHERE " . implode(" AND ", $where_conditions) : "";
+
+// Statistiques
+$stats_query = "SELECT role, COUNT(*) as total FROM utilisateurs $where_clause GROUP BY role";
+if (!empty($params)) {
+    $stmt_stats = mysqli_prepare($conn, $stats_query);
+    if ($types) {
+        mysqli_stmt_bind_param($stmt_stats, $types, ...$params);
+    }
+    mysqli_stmt_execute($stmt_stats);
+    $stats_result = mysqli_stmt_get_result($stmt_stats);
+} else {
+    $stats_result = mysqli_query($conn, $stats_query);
+}
+
+$stats = [];
+$total_users = 0;
+while ($stat = mysqli_fetch_assoc($stats_result)) {
+    $stats[$stat['role']] = $stat['total'];
+    $total_users += $stat['total'];
+}
+
+// Liste des utilisateurs
+$query = "SELECT id, nom, email, role, date_creation FROM utilisateurs $where_clause ORDER BY id DESC";
+if (!empty($params)) {
+    $stmt = mysqli_prepare($conn, $query);
+    if ($types) {
+        mysqli_stmt_bind_param($stmt, $types, ...$params);
+    }
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
+} else {
+    $result = mysqli_query($conn, $query);
+}
+?>
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>👨‍💼 Gestion des utilisateurs - Smart Stock</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="../../assets/css/styles_connected.css">
+</head>
+<body>
+
+<header>
+    <nav class="navbar">
+        <div class="nav-left">
+            <a href="index.php" class="logo-link">
+                <img src="../../assets/images/logo_epicerie.png" alt="Logo" class="logo-navbar">
+            </a>
+            <a href="index.php" class="nav-link">Tableau de bord</a>
+            <a href="stock.php" class="nav-link">Stock</a>
+            <a href="ventes.php" class="nav-link">Ventes</a>
+            <a href="clients.php" class="nav-link">Clients</a>
+            <a href="commandes.php" class="nav-link">Commandes</a>
+            <a href="categories.php" class="nav-link">Catégories</a>
+            <a href="utilisateurs.php" class="nav-link">Utilisateurs</a>
+            <a href="demandes_acces.php" class="nav-link">Demandes d'accès</a>
+        </div>
+        <a href="logout.php" class="logout">🚪 Déconnexion</a>
+    </nav>
+</header>
+
+<div class="main-container">
+    <div class="content-wrapper">
+    <h1>👨‍💼 Gestion des utilisateurs</h1>
+        
+        <p style="margin-bottom: 25px;">
+            <a href="index.php" class="btn btn-secondary">⬅️ Retour au tableau de bord</a>
+        </p>
+
+    <?php if ($message): ?>
+            <div class="message <?= strpos($message, '✅') !== false ? 'success' : (strpos($message, '⚠️') !== false ? 'warning' : 'error') ?>">
+                <?= $message ?>
+            </div>
+        <?php endif; ?>
+
+        <?php if (!$peut_modifier): ?>
+            <div class="message warning">
+                ℹ️ <strong>Mode consultation</strong> : Vous pouvez consulter les utilisateurs mais vous n'avez pas les droits pour modifier les rôles. 
+                Seuls les <strong>admins</strong> peuvent gérer les utilisateurs.
+            </div>
+    <?php endif; ?>
+
+        <!-- Statistiques -->
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 15px; margin-bottom: 25px;">
+            <h3 style="margin-top: 0; color: var(--primary-color);">📊 Statistiques</h3>
+            <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                <div><strong>Total :</strong> <?= $total_users ?> utilisateur<?= $total_users > 1 ? 's' : '' ?></div>
+                <?php if (isset($stats['admin'])): ?>
+                    <div><strong>Admins :</strong> <span style="color: #dc3545; font-weight: bold;"><?= $stats['admin'] ?></span></div>
+                <?php endif; ?>
+                <?php if (isset($stats['responsable_approvisionnement'])): ?>
+                    <div><strong>Responsables :</strong> <span style="color: #fd7e14; font-weight: bold;"><?= $stats['responsable_approvisionnement'] ?></span></div>
+                <?php endif; ?>
+                <?php if (isset($stats['vendeur'])): ?>
+                    <div><strong>Vendeurs :</strong> <span style="color: #0d6efd; font-weight: bold;"><?= $stats['vendeur'] ?></span></div>
+                <?php endif; ?>
+                <?php if (isset($stats['tresorier'])): ?>
+                    <div><strong>Trésoriers :</strong> <span style="color: #198754; font-weight: bold;"><?= $stats['tresorier'] ?></span></div>
+                <?php endif; ?>
+            </div>
+        </div>
+
+        <!-- Recherche et filtres -->
+        <div class="filters" style="background: #f8f9fa; padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+            <form method="GET" style="display: flex; gap: 10px; flex-wrap: wrap; align-items: end;">
+                <div style="flex: 1 1 200px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: 600;">🔍 Rechercher :</label>
+                    <input type="text" name="recherche" placeholder="Nom ou email..." value="<?= htmlspecialchars($recherche) ?>" style="width: 100%; padding: 10px; border-radius: 8px; border: 2px solid #e0e0e0;">
+                </div>
+                <div style="flex: 0 1 150px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: 600;">Filtrer par rôle :</label>
+                    <select name="role" style="width: 100%; padding: 10px; border-radius: 8px; border: 2px solid #e0e0e0;">
+                        <option value="">Tous les rôles</option>
+                        <option value="admin" <?= $filtre_role == 'admin' ? 'selected' : '' ?>>Admin</option>
+                        <option value="responsable_approvisionnement" <?= $filtre_role == 'responsable_approvisionnement' ? 'selected' : '' ?>>Responsable</option>
+                        <option value="vendeur" <?= $filtre_role == 'vendeur' ? 'selected' : '' ?>>Vendeur</option>
+                        <option value="tresorier" <?= $filtre_role == 'tresorier' ? 'selected' : '' ?>>Trésorier</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn">Filtrer</button>
+                <a href="utilisateurs.php" class="btn btn-secondary">Réinitialiser</a>
+            </form>
+        </div>
+
+    <table>
+            <thead>
+        <tr>
+            <th>ID</th>
+            <th>Nom</th>
+            <th>Email</th>
+                    <th>Rôle</th>
+                    <th>Date de création</th>
+                    <?php if ($peut_modifier): ?><th>Actions</th><?php endif; ?>
+        </tr>
+            </thead>
+            <tbody>
+                <?php 
+                if (mysqli_num_rows($result) > 0):
+                    while ($user = mysqli_fetch_assoc($result)): 
+                        // Badge coloré selon le rôle (utilise role_helper.php)
+                ?>
+        <tr>
+            <td><?= $user['id'] ?></td>
+                    <td>
+                        <strong><?= htmlspecialchars($user['nom']) ?></strong>
+                        <?php if ($user['id'] == $_SESSION['id_utilisateur']): ?>
+                            <span style="color: #666; font-size: 0.9em;">(Vous)</span>
+                        <?php endif; ?>
+                    </td>
+            <td><?= htmlspecialchars($user['email']) ?></td>
+                    <td>
+                        <?= displayRoleBadge($user['role']) ?>
+                    </td>
+                    <td><?= date('d/m/Y', strtotime($user['date_creation'])) ?></td>
+                    <?php if ($peut_modifier): ?>
+            <td>
+                <?php if ($user['id'] != $_SESSION['id_utilisateur']): ?>
+                            <form method="POST" style="display: flex; gap: 10px; align-items: center;" onsubmit="return confirm('Êtes-vous sûr de vouloir changer le rôle de <?= htmlspecialchars($user['nom']) ?> ?');">
+                    <input type="hidden" name="id_utilisateur" value="<?= $user['id'] ?>">
+                                <select name="nouveau_role" style="padding: 8px; border-radius: 8px; border: 2px solid #e0e0e0;">
+                                    <option value="admin" <?= $user['role'] == 'admin' ? 'selected' : '' ?>>👑 Admin</option>
+                                    <option value="responsable_approvisionnement" <?= $user['role'] == 'responsable_approvisionnement' ? 'selected' : '' ?>>📦 Responsable</option>
+                                    <option value="vendeur" <?= $user['role'] == 'vendeur' ? 'selected' : '' ?>>💰 Vendeur</option>
+                                    <option value="tresorier" <?= $user['role'] == 'tresorier' ? 'selected' : '' ?>>💼 Trésorier</option>
+                    </select>
+                                <button type="submit" name="changer_role" class="btn btn-sm">✏️ Modifier</button>
+                </form>
+                <?php else: ?>
+                                <em style="color: #666;">Vous ne pouvez pas modifier votre propre rôle</em>
+                <?php endif; ?>
+                        </td>
+                    <?php endif; ?>
+                </tr>
+                <?php 
+                    endwhile;
+                else:
+                ?>
+                <tr>
+                    <td colspan="<?= $peut_modifier ? '6' : '5' ?>" style="text-align: center; padding: 20px;">
+                        Aucun utilisateur trouvé.
+            </td>
+        </tr>
+                <?php endif; ?>
+            </tbody>
+    </table>
+    </div>
+</div>
+</body>
+</html>

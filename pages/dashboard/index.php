@@ -1,0 +1,428 @@
+<?php
+// index.php — Tableau de bord principal du PGI Épicerie
+session_start();
+
+// Vérifie si l'utilisateur est connecté
+if (!isset($_SESSION['id_utilisateur'])) {
+    header("Location: ../auth/auth.php");
+    exit();
+}
+
+include('../../config/db_conn.php');
+include('../../includes/role_helper.php');
+
+$nom = $_SESSION['nom'];
+$role = $_SESSION['role'];
+$id_utilisateur = $_SESSION['id_utilisateur'];
+$role_badge = getRoleBadge($role);
+
+// === STATISTIQUES ===
+
+// Ventes du jour
+$ventes_jour = mysqli_query($conn, "SELECT SUM(total) as total FROM ventes WHERE DATE(date_vente) = CURDATE()");
+$total_jour = mysqli_fetch_assoc($ventes_jour)['total'] ?? 0;
+
+// Ventes de la semaine
+$ventes_semaine = mysqli_query($conn, "SELECT SUM(total) as total FROM ventes WHERE YEARWEEK(date_vente) = YEARWEEK(CURDATE())");
+$total_semaine = mysqli_fetch_assoc($ventes_semaine)['total'] ?? 0;
+
+// Ventes du mois
+$ventes_mois = mysqli_query($conn, "SELECT SUM(total) as total FROM ventes WHERE MONTH(date_vente) = MONTH(CURDATE()) AND YEAR(date_vente) = YEAR(CURDATE())");
+$total_mois = mysqli_fetch_assoc($ventes_mois)['total'] ?? 0;
+
+// Total ventes
+$ventes_total = mysqli_query($conn, "SELECT SUM(total) as total FROM ventes");
+$total_ventes = mysqli_fetch_assoc($ventes_total)['total'] ?? 0;
+
+// Nombre de produits
+$nb_produits = mysqli_query($conn, "SELECT COUNT(*) as total FROM produits");
+$total_produits = mysqli_fetch_assoc($nb_produits)['total'];
+
+// Stock total en valeur (prix d'achat)
+$stock_valeur = mysqli_query($conn, "SELECT SUM(quantite_stock * prix_achat) as total FROM produits");
+$valeur_stock = mysqli_fetch_assoc($stock_valeur)['total'] ?? 0;
+
+// Produits en stock bas (< 10)
+$stock_bas = mysqli_query($conn, "SELECT COUNT(*) as total FROM produits WHERE quantite_stock < 10 AND quantite_stock > 0");
+$nb_stock_bas = mysqli_fetch_assoc($stock_bas)['total'];
+
+// Produits en stock critique (0)
+$stock_critique = mysqli_query($conn, "SELECT COUNT(*) as total FROM produits WHERE quantite_stock <= 0");
+$nb_stock_critique = mysqli_fetch_assoc($stock_critique)['total'];
+
+// Liste des produits en stock bas/critique
+$produits_alertes = mysqli_query($conn, "SELECT id, nom, quantite_stock FROM produits WHERE quantite_stock < 10 ORDER BY quantite_stock ASC LIMIT 10");
+
+// Produits les plus vendus (top 5)
+$top_produits = mysqli_query($conn, "
+    SELECT p.nom, SUM(dv.quantite) as total_vendu
+    FROM details_vente dv
+    JOIN produits p ON dv.id_produit = p.id
+    GROUP BY p.id, p.nom
+    ORDER BY total_vendu DESC
+    LIMIT 5
+");
+
+// Nombre de clients
+$nb_clients = mysqli_query($conn, "SELECT COUNT(*) as total FROM clients");
+$total_clients = mysqli_fetch_assoc($nb_clients)['total'];
+
+// Ventes récentes (5 dernières)
+$ventes_recentes = mysqli_query($conn, "
+    SELECT v.id, v.date_vente, v.total, c.nom as client_nom
+    FROM ventes v
+    LEFT JOIN clients c ON v.id_client = c.id
+    ORDER BY v.date_vente DESC
+    LIMIT 5
+");
+
+// Données pour graphique (ventes des 7 derniers jours)
+$ventes_7jours = mysqli_query($conn, "
+    SELECT DATE(date_vente) as date, SUM(total) as total
+    FROM ventes
+    WHERE date_vente >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+    GROUP BY DATE(date_vente)
+    ORDER BY date ASC
+");
+
+$labels_graph = [];
+$data_graph = [];
+while ($row = mysqli_fetch_assoc($ventes_7jours)) {
+    $labels_graph[] = date('d/m', strtotime($row['date']));
+    $data_graph[] = floatval($row['total']);
+}
+
+// Vérifier les demandes d'accès en attente (pour les admins)
+$nb_demandes_attente = 0;
+$table_exists = mysqli_query($conn, "SHOW TABLES LIKE 'demandes_acces'");
+if (mysqli_num_rows($table_exists) > 0) {
+    if ($role === 'admin') {
+        $check_demandes = mysqli_query($conn, "SELECT COUNT(*) as total FROM demandes_acces WHERE statut = 'en_attente'");
+        $nb_demandes_attente = mysqli_fetch_assoc($check_demandes)['total'] ?? 0;
+    } elseif (in_array($role, ['vendeur', 'tresorier'])) {
+        $check_demandes = mysqli_query($conn, "SELECT COUNT(*) as total FROM demandes_acces WHERE id_utilisateur = $id_utilisateur AND statut = 'en_attente'");
+        $nb_demandes_attente = mysqli_fetch_assoc($check_demandes)['total'] ?? 0;
+    }
+}
+?>
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Tableau de bord - Smart Stock</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="../../assets/css/styles_connected.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    /* Styles spécifiques au dashboard */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+    .stat-card {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      border-left: 4px solid var(--primary-color);
+    }
+    .stat-card h3 {
+      font-size: 0.9em;
+      color: #666;
+      margin: 0 0 10px 0;
+      text-transform: uppercase;
+    }
+    .stat-card .value {
+      font-size: 2em;
+      font-weight: bold;
+      color: #333;
+    }
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+    .chart-box {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <nav class="navbar">
+      <div class="nav-left">
+        <a href="index.php" class="logo-link">
+          <img src="../../assets/images/logo_epicerie.png" alt="Logo Smart Stock" class="logo-navbar">
+        </a>
+        <a href="index.php" class="nav-link">Tableau de bord</a>
+        <a href="../stock/stock.php" class="nav-link">Stock</a>
+        <a href="../ventes/ventes.php" class="nav-link">Ventes</a>
+        <a href="../clients/clients.php" class="nav-link">Clients</a>
+        <a href="../commandes/commandes.php" class="nav-link">Commandes</a>
+        <a href="../stock/categories.php" class="nav-link">Catégories</a>
+        <?php if ($role === 'admin'): ?>
+          <?php
+          $table_exists = mysqli_query($conn, "SHOW TABLES LIKE 'demandes_acces'");
+          $nb_demandes_attente = 0;
+          if (mysqli_num_rows($table_exists) > 0) {
+              $check_demandes = mysqli_query($conn, "SELECT COUNT(*) as total FROM demandes_acces WHERE statut = 'en_attente'");
+              $nb_demandes_attente = mysqli_fetch_assoc($check_demandes)['total'] ?? 0;
+          }
+          ?>
+          <a href="../admin/demandes_acces.php" class="nav-link" style="position: relative;">
+            🔐 Demandes
+            <?php if ($nb_demandes_attente > 0): ?>
+              <span style="background: #dc3545; color: white; border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.75em; font-weight: bold; margin-left: 8px; position: absolute; top: -8px; right: -15px; box-shadow: 0 2px 8px rgba(220,53,69,0.4);">
+                <?= $nb_demandes_attente ?>
+              </span>
+            <?php endif; ?>
+          </a>
+          <a href="../admin/utilisateurs.php" class="nav-link">Utilisateurs</a>
+        <?php endif; ?>
+      </div>
+      <div style="display: flex; align-items: center; gap: 15px;">
+        <span style="color: #666; font-size: 0.9em;">
+          <?= displayRoleBadge($role) ?>
+        </span>
+        <a href="../auth/logout.php" class="logout">🚪 Déconnexion</a>
+      </div>
+    </nav>
+  </header>
+
+  <div class="main-container">
+    <div class="content-wrapper">
+      <div style="text-align: center; margin-bottom: 30px;">
+        <h2 style="color: var(--primary-color); font-size: 2em; margin-bottom: 10px;">
+          Bienvenue, <?= htmlspecialchars($nom) ?> ! 👋
+        </h2>
+        <p style="color: #666; font-size: 0.9em; margin-top: 8px;">
+          <?= getRoleDescription($role) ?>
+        </p>
+        <?php if (in_array($role, ['vendeur', 'tresorier'])): ?>
+          <?php
+          $table_exists = mysqli_query($conn, "SHOW TABLES LIKE 'demandes_acces'");
+          $nb_demandes = 0;
+          if (mysqli_num_rows($table_exists) > 0) {
+              $check_demandes = mysqli_query($conn, "SELECT COUNT(*) as total FROM demandes_acces WHERE id_utilisateur = $id_utilisateur AND statut = 'en_attente'");
+              $nb_demandes = mysqli_fetch_assoc($check_demandes)['total'] ?? 0;
+          }
+          ?>
+          <?php if ($nb_demandes > 0): ?>
+            <div class="message warning" style="margin-top: 15px; max-width: 600px; margin-left: auto; margin-right: auto;">
+              🔔 Vous avez <?= $nb_demandes ?> demande<?= $nb_demandes > 1 ? 's' : '' ?> en attente. 
+              <a href="../admin/demandes_acces.php" style="color: var(--primary-color); font-weight: bold;">Voir mes demandes</a>
+            </div>
+          <?php else: ?>
+            <div style="margin-top: 15px;">
+              <a href="../admin/demandes_acces.php" class="btn btn-info" style="display: inline-block;">
+                🔐 Demander un accès supplémentaire
+              </a>
+            </div>
+          <?php endif; ?>
+        <?php elseif ($role === 'admin'): ?>
+          <?php
+          $table_exists = mysqli_query($conn, "SHOW TABLES LIKE 'demandes_acces'");
+          $nb_demandes_attente = 0;
+          if (mysqli_num_rows($table_exists) > 0) {
+              $check_demandes = mysqli_query($conn, "SELECT COUNT(*) as total FROM demandes_acces WHERE statut = 'en_attente'");
+              $nb_demandes_attente = mysqli_fetch_assoc($check_demandes)['total'] ?? 0;
+          }
+          ?>
+          <?php if ($nb_demandes_attente > 0): ?>
+            <div class="message error" style="margin-top: 15px; max-width: 600px; margin-left: auto; margin-right: auto;">
+              <strong>⚠️ <?= $nb_demandes_attente ?> demande<?= $nb_demandes_attente > 1 ? 's' : '' ?> en attente</strong><br>
+              Des vendeurs ont demandé des accès supplémentaires. Traitez leurs demandes depuis la page dédiée.
+              <a href="../admin/demandes_acces.php" class="btn" style="background: #dc3545; color: white; padding: 10px 20px; margin-top: 10px; display: inline-block; font-weight: bold;">
+                Voir les demandes
+              </a>
+            </div>
+          <?php endif; ?>
+        <?php endif; ?>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <h3>💰 Ventes du jour</h3>
+          <div class="value"><?= number_format($total_jour, 2, ',', ' ') ?> €</div>
+        </div>
+        <div class="stat-card">
+          <h3>📅 Ventes de la semaine</h3>
+          <div class="value"><?= number_format($total_semaine, 2, ',', ' ') ?> €</div>
+        </div>
+        <div class="stat-card">
+          <h3>📊 Ventes du mois</h3>
+          <div class="value"><?= number_format($total_mois, 2, ',', ' ') ?> €</div>
+        </div>
+        <div class="stat-card">
+          <h3>💵 Total ventes</h3>
+          <div class="value"><?= number_format($total_ventes, 2, ',', ' ') ?> €</div>
+        </div>
+        <div class="stat-card">
+          <h3>📦 Total produits</h3>
+          <div class="value"><?= $total_produits ?></div>
+        </div>
+        <div class="stat-card">
+          <h3>💎 Valeur du stock</h3>
+          <div class="value"><?= number_format($valeur_stock, 2, ',', ' ') ?> €</div>
+        </div>
+        <div class="stat-card alertes">
+          <h3>⚠️ Stock bas</h3>
+          <p class="value"><?= $nb_stock_bas ?></p>
+        </div>
+        <div class="stat-card alertes">
+          <h3>🚨 Stock critique</h3>
+          <p class="value"><?= $nb_stock_critique ?></p>
+        </div>
+        <div class="stat-card">
+          <h3>👥 Total clients</h3>
+          <p class="value"><?= $total_clients ?></p>
+        </div>
+      </div>
+
+      <!-- Alertes de stock -->
+      <?php if ($nb_stock_bas > 0 || $nb_stock_critique > 0): ?>
+      <div class="alertes-box">
+        <h3>⚠️ Alertes de stock</h3>
+        <?php
+        mysqli_data_seek($produits_alertes, 0);
+        while ($prod = mysqli_fetch_assoc($produits_alertes)):
+          $class = $prod['quantite_stock'] <= 0 ? 'critique' : 'bas';
+        ?>
+          <div class="alerte-item <?= $class ?>">
+            <span><strong><?= htmlspecialchars($prod['nom']) ?></strong></span>
+            <span>Stock: <?= $prod['quantite_stock'] ?></span>
+          </div>
+        <?php endwhile; ?>
+        <p style="margin-top: 15px;">
+          <a href="../stock/stock.php?stock=bas" class="btn">Voir tous les stocks bas</a>
+        </p>
+      </div>
+      <?php endif; ?>
+
+      <!-- Graphiques et données -->
+      <div class="charts-grid">
+        <div class="chart-box">
+          <h3>📈 Ventes des 7 derniers jours</h3>
+          <canvas id="ventesChart"></canvas>
+        </div>
+        <div class="chart-box">
+          <h3>🏆 Top 5 produits vendus</h3>
+          <ul style="list-style: none; padding: 0;">
+            <?php
+            mysqli_data_seek($top_produits, 0);
+            $rank = 1;
+            while ($prod = mysqli_fetch_assoc($top_produits)):
+            ?>
+              <li style="padding: 10px; margin: 5px 0; background: #f8f9fa; border-radius: 8px;">
+                <strong>#<?= $rank ?></strong> <?= htmlspecialchars($prod['nom']) ?> - 
+                <span style="color: #28a745; font-weight: bold;"><?= $prod['total_vendu'] ?> unités</span>
+              </li>
+            <?php
+              $rank++;
+            endwhile;
+            ?>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Ventes récentes -->
+      <div class="chart-box" style="margin-top: 20px;">
+        <h3>📋 Ventes récentes</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Client</th>
+              <th>Montant</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php
+            mysqli_data_seek($ventes_recentes, 0);
+            while ($vente = mysqli_fetch_assoc($ventes_recentes)):
+            ?>
+              <tr>
+                <td><?= date('d/m/Y H:i', strtotime($vente['date_vente'])) ?></td>
+                <td><?= htmlspecialchars($vente['client_nom'] ?? 'Client anonyme') ?></td>
+                <td><?= number_format($vente['total'], 2, ',', ' ') ?> €</td>
+                <td><a href="../ventes/detailVente.php?id=<?= $vente['id'] ?>" class="btn btn-sm">Voir détails</a></td>
+              </tr>
+            <?php endwhile; ?>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Cartes d'accès rapide -->
+      <div class="stats-grid" style="margin-top: 30px;">
+        <a href="../stock/stock.php" class="stat-card" style="text-decoration: none; color: inherit; display: block;">
+          <h3>📦 Gérer le stock</h3>
+          <p style="color: #666; margin-top: 10px;">Ajouter, modifier des produits</p>
+        </a>
+        <a href="../ventes/ventes.php" class="stat-card" style="text-decoration: none; color: inherit; display: block;">
+          <h3>💰 Nouvelle vente</h3>
+          <p style="color: #666; margin-top: 10px;">Enregistrer une vente</p>
+        </a>
+        <a href="../commandes/commandes.php" class="stat-card" style="text-decoration: none; color: inherit; display: block;">
+          <h3>📋 Nouvelle commande</h3>
+          <p style="color: #666; margin-top: 10px;">Commander auprès d'un fournisseur</p>
+        </a>
+        <?php if ($role === 'admin'): ?>
+          <?php
+          $table_exists = mysqli_query($conn, "SHOW TABLES LIKE 'demandes_acces'");
+          $nb_demandes_attente = 0;
+          if (mysqli_num_rows($table_exists) > 0) {
+              $check_demandes = mysqli_query($conn, "SELECT COUNT(*) as total FROM demandes_acces WHERE statut = 'en_attente'");
+              $nb_demandes_attente = mysqli_fetch_assoc($check_demandes)['total'] ?? 0;
+          }
+          ?>
+          <a href="../admin/demandes_acces.php" class="stat-card" style="text-decoration: none; color: inherit; display: block; background: linear-gradient(135deg, #dc3545, #c82333); color: white;">
+            <h3 style="color: white;">🔐 Demandes d'accès</h3>
+            <p style="color: rgba(255,255,255,0.9); margin-top: 10px;">
+              <?= $nb_demandes_attente > 0 ? "<strong>$nb_demandes_attente demande(s) en attente</strong>" : "Traitez les demandes des vendeurs pour leur accorder des privilèges supplémentaires." ?>
+            </p>
+            <a href="../admin/demandes_acces.php" class="btn" style="background: white; color: #dc3545; font-weight: bold; padding: 12px 24px; box-shadow: 0 4px 15px rgba(255,255,255,0.3); margin-top: 15px; display: inline-block;">
+              Traiter les demandes
+            </a>
+          </a>
+        <?php endif; ?>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Graphique des ventes
+    const ctx = document.getElementById('ventesChart').getContext('2d');
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: <?= json_encode($labels_graph) ?>,
+        datasets: [{
+          label: 'Ventes (€)',
+          data: <?= json_encode($data_graph) ?>,
+          borderColor: 'rgb(40, 167, 69)',
+          backgroundColor: 'rgba(40, 167, 69, 0.1)',
+          tension: 0.4,
+          fill: true
+        }]
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: {
+            beginAtZero: true
+          }
+        }
+      }
+    });
+  </script>
+
+</body>
+</html>
