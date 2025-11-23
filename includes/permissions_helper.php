@@ -1,8 +1,10 @@
 <?php
 /**
  * Helper pour gérer les permissions des utilisateurs
+ * Protection contre les inclusions multiples
  */
-include_once(__DIR__ . '/db_compat_helper.php');
+if (!function_exists('getPermissionsDisponibles')) {
+    include_once(__DIR__ . '/db_compat_helper.php');
 
 /**
  * Liste des permissions disponibles dans l'application
@@ -173,5 +175,7 @@ function supprimerToutesPermissions($conn, $id_utilisateur) {
     
     return $success;
 }
+
+} // Fin de la protection contre les inclusions multiples
 ?>
 

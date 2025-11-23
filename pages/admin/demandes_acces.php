@@ -8,7 +8,7 @@ if (!isset($_SESSION['id_utilisateur'])) {
 include('../../config/db_conn.php');
 include('../../includes/historique_helper.php');
 include('../../includes/role_helper.php');
-include('../../includes/permissions_helper.php');
+include_once('../../includes/permissions_helper.php');
 
 $role = $_SESSION['role'];
 $id_utilisateur = $_SESSION['id_utilisateur'];
@@ -207,32 +207,18 @@ if ($peut_demander) {
 </head>
 <body>
 
-<header>
-    <nav class="navbar">
-        <div class="nav-left">
-            <a href="index.php" class="logo-link">
-                <img src="../../assets/images/logo_epicerie.png" alt="Logo" class="logo-navbar">
-            </a>
-            <a href="index.php" class="nav-link">Tableau de bord</a>
-            <a href="stock.php" class="nav-link">Stock</a>
-            <a href="ventes.php" class="nav-link">Ventes</a>
-            <a href="clients.php" class="nav-link">Clients</a>
-            <a href="commandes.php" class="nav-link">Commandes</a>
-            <a href="categories.php" class="nav-link">Catégories</a>
-            <?php if ($peut_approuver): ?>
-                <a href="utilisateurs.php" class="nav-link">Utilisateurs</a>
-            <?php endif; ?>
-        </div>
-        <a href="logout.php" class="logout">🚪 Déconnexion</a>
-    </nav>
-</header>
+<?php
+// Inclure la navbar réutilisable
+// Ne pas définir $role_badge ici, navbar.php utilisera displayRoleBadge() directement
+include('../../includes/navbar.php');
+?>
 
 <div class="main-container">
     <div class="content-wrapper">
         <h1><?= $peut_demander ? '🔐 Mes demandes d\'accès' : '🔐 Gestion des demandes d\'accès' ?></h1>
         
         <p style="margin-bottom: 25px;">
-            <a href="index.php" class="btn btn-secondary">⬅️ Retour au tableau de bord</a>
+            <a href="../dashboard/index.php" class="btn btn-secondary">⬅️ Retour au tableau de bord</a>
         </p>
 
         <?php if ($message): ?>

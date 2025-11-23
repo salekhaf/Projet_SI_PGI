@@ -217,18 +217,18 @@ if (isset($_GET['edit']) && $peut_modifier) {
 <header>
     <nav class="navbar">
         <div class="nav-left">
-    <a href="../dashboard/index.php" class="logo-link">
+    <a href="index.php" class="logo-link">
         <img src="../../assets/images/logo_epicerie.png" class="logo-navbar" alt="Logo">
     </a>
-            <a href="../dashboard/index.php" class="nav-link">Tableau de bord</a>
+            <a href="index.php" class="nav-link">Tableau de bord</a>
     <a href="stock.php" class="nav-link">Stock</a>
-    <a href="../ventes/ventes.php" class="nav-link">Ventes</a>
-    <a href="../clients/clients.php" class="nav-link">Clients</a>
-    <a href="../fournisseurs/fournisseurs.php" class="nav-link">Fournisseurs</a>
-            <a href="../commandes/commandes.php" class="nav-link">Commandes</a>
+    <a href="ventes.php" class="nav-link">Ventes</a>
+    <a href="clients.php" class="nav-link">Clients</a>
+    <a href="fournisseurs.php" class="nav-link">Fournisseurs</a>
+            <a href="commandes.php" class="nav-link">Commandes</a>
             <a href="categories.php" class="nav-link">Catégories</a>
 </div>
-        <a href="../auth/logout.php" class="logout">🚪 Déconnexion</a>
+        <a href="logout.php" class="logout">🚪 Déconnexion</a>
     </nav>
 </header>
 
@@ -327,7 +327,7 @@ if (isset($_GET['edit']) && $peut_modifier) {
             <?= $produit_edit ? '✏️ Modifier' : '➕ Ajouter' ?>
         </button>
         <?php if ($produit_edit): ?>
-                <a href="stock.php" class="btn btn-secondary">Annuler</a>
+            <a href="stock.php" class="btn btn-secondary">Annuler</a>
         <?php endif; ?>
     </form>
     <?php endif; ?>

@@ -181,17 +181,17 @@ if (isset($_GET['edit']) && $peut_modifier) {
 <header>
     <nav class="navbar">
         <div class="nav-left">
-            <a href="index.php" class="logo-link">
+            <a href="../dashboard/index.php" class="logo-link">
                 <img src="../../assets/images/logo_epicerie.png" alt="Logo" class="logo-navbar">
             </a>
-            <a href="index.php" class="nav-link">Tableau de bord</a>
-            <a href="stock.php" class="nav-link">Stock</a>
-            <a href="ventes.php" class="nav-link">Ventes</a>
+            <a href="../dashboard/index.php" class="nav-link">Tableau de bord</a>
+            <a href="../stock/stock.php" class="nav-link">Stock</a>
+            <a href="../ventes/ventes.php" class="nav-link">Ventes</a>
             <a href="clients.php" class="nav-link">Clients</a>
-            <a href="commandes.php" class="nav-link">Commandes</a>
-            <a href="categories.php" class="nav-link">Catégories</a>
+            <a href="../commandes/commandes.php" class="nav-link">Commandes</a>
+            <a href="../stock/categories.php" class="nav-link">Catégories</a>
         </div>
-        <a href="logout.php" class="logout">🚪 Déconnexion</a>
+        <a href="../auth/logout.php" class="logout">🚪 Déconnexion</a>
     </nav>
 </header>
 
