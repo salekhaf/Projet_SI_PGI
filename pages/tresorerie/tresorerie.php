@@ -124,7 +124,7 @@ if (!$est_admin && !$acces_autorise && !$demande_en_attente) {
                     <textarea name="raison" class="form-control" rows="4" required placeholder="Ex: Besoin de consulter le chiffre d'affaires du mois pour préparer un rapport..."></textarea>
                 </div>
                 <button type="submit" name="demander_acces" class="btn btn-primary">📤 Envoyer la demande</button>
-                <a href="../../../../../../pages/dashboard/index.php" class="btn btn-secondary">⬅️ Retour au tableau de bord</a>
+                <a href="../dashboard/index.php" class="btn btn-secondary">⬅️ Retour au tableau de bord</a>
             </form>
         </div>
     </div>
@@ -168,9 +168,9 @@ if (!$est_admin && !$acces_autorise && $demande_en_attente) {
             <div class="alert alert-info">
                 <h3>⏳ Demande en attente</h3>
                 <p>Votre demande d'accès a été envoyée et est en cours d'examen par un administrateur.</p>
-                <p>Vous pouvez consulter l'historique de vos demandes dans la page <a href="../../../../../../pages/admin/demandes_acces.php">Demandes d'accès</a>.</p>
+                <p>Vous pouvez consulter l'historique de vos demandes dans la page <a href="../admin/demandes_acces.php">Demandes d'accès</a>.</p>
             </div>
-            <a href="../../../../../../pages/dashboard/index.php" class="btn btn-secondary">⬅️ Retour au tableau de bord</a>
+            <a href="../dashboard/index.php" class="btn btn-secondary">⬅️ Retour au tableau de bord</a>
         </div>
     </div>
     </body>

@@ -140,9 +140,27 @@ if ((is_object($table_exists) && method_exists($table_exists, 'num_rows') ? $tab
       border-left: 4px solid var(--primary-color);
       transition: var(--transition);
     }
+    .stat-card {
+      position: relative;
+      overflow: hidden;
+    }
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+      transition: left 0.5s;
+    }
     .stat-card:hover {
       transform: translateY(-5px);
       box-shadow: var(--box-shadow-hover);
+      border-left-width: 6px;
+    }
+    .stat-card:hover::before {
+      left: 100%;
     }
     .stat-card h3 {
       font-size: 0.9em;
@@ -213,10 +231,10 @@ if ((is_object($table_exists) && method_exists($table_exists, 'num_rows') ? $tab
   <header>
     <nav class="navbar">
       <div class="nav-left">
-        <a href="../../../../../../pages/dashboard/index.php" class="logo-link">
+        <a href="index.php" class="logo-link">
           <img src="../../assets/images/logo_epicerie.png" alt="Logo Smart Stock" class="logo-navbar">
         </a>
-        <a href="../../../../../../pages/dashboard/index.php" class="nav-link">Tableau de bord</a>
+        <a href="index.php" class="nav-link">Tableau de bord</a>
         <a href="../stock/stock.php" class="nav-link">Stock</a>
         <a href="../ventes/ventes.php" class="nav-link">Ventes</a>
         <a href="../clients/clients.php" class="nav-link">Clients</a>
@@ -467,24 +485,43 @@ if ((is_object($table_exists) && method_exists($table_exists, 'num_rows') ? $tab
 
       <!-- Cartes d'accès rapide -->
       <div class="stats-grid" style="margin-top: 30px;">
-        <a href="../stock/stock.php" class="stat-card" style="text-decoration: none; color: inherit; display: block;">
+        <a href="../stock/stock.php" class="stat-card" style="text-decoration: none; color: inherit; display: block; cursor: pointer; transition: var(--transition);">
           <h3>📦 Gérer le stock</h3>
-          <p style="color: #666; margin-top: 10px;">Ajouter, modifier des produits</p>
+          <p style="color: #666; margin-top: 10px; margin-bottom: 0;">Ajouter, modifier des produits</p>
+          <span style="display: inline-block; margin-top: 10px; color: var(--primary-color); font-weight: 600;">→ Accéder</span>
         </a>
-        <a href="../ventes/ventes.php" class="stat-card" style="text-decoration: none; color: inherit; display: block;">
+        <a href="../ventes/ventes.php" class="stat-card" style="text-decoration: none; color: inherit; display: block; cursor: pointer; transition: var(--transition);">
           <h3>💰 Nouvelle vente</h3>
-          <p style="color: #666; margin-top: 10px;">Enregistrer une vente</p>
+          <p style="color: #666; margin-top: 10px; margin-bottom: 0;">Enregistrer une vente</p>
+          <span style="display: inline-block; margin-top: 10px; color: var(--primary-color); font-weight: 600;">→ Accéder</span>
+        </a>
+        <a href="../clients/clients.php" class="stat-card" style="text-decoration: none; color: inherit; display: block; cursor: pointer; transition: var(--transition);">
+          <h3>👥 Gérer les clients</h3>
+          <p style="color: #666; margin-top: 10px; margin-bottom: 0;">Ajouter, modifier des clients</p>
+          <span style="display: inline-block; margin-top: 10px; color: var(--primary-color); font-weight: 600;">→ Accéder</span>
         </a>
         <?php if ($role === 'admin' || $role === 'responsable_approvisionnement'): ?>
-        <a href="../commandes/commandes.php" class="stat-card" style="text-decoration: none; color: inherit; display: block;">
+        <a href="../commandes/commandes.php" class="stat-card" style="text-decoration: none; color: inherit; display: block; cursor: pointer; transition: var(--transition);">
           <h3>📋 Nouvelle commande</h3>
-          <p style="color: #666; margin-top: 10px;">Commander auprès d'un fournisseur</p>
+          <p style="color: #666; margin-top: 10px; margin-bottom: 0;">Commander auprès d'un fournisseur</p>
+          <span style="display: inline-block; margin-top: 10px; color: var(--primary-color); font-weight: 600;">→ Accéder</span>
+        </a>
+        <a href="../fournisseurs/fournisseurs.php" class="stat-card" style="text-decoration: none; color: inherit; display: block; cursor: pointer; transition: var(--transition);">
+          <h3>🚚 Fournisseurs</h3>
+          <p style="color: #666; margin-top: 10px; margin-bottom: 0;">Gérer les fournisseurs</p>
+          <span style="display: inline-block; margin-top: 10px; color: var(--primary-color); font-weight: 600;">→ Accéder</span>
         </a>
         <?php endif; ?>
+        <a href="../stock/categories.php" class="stat-card" style="text-decoration: none; color: inherit; display: block; cursor: pointer; transition: var(--transition);">
+          <h3>🏷️ Catégories</h3>
+          <p style="color: #666; margin-top: 10px; margin-bottom: 0;">Gérer les catégories de produits</p>
+          <span style="display: inline-block; margin-top: 10px; color: var(--primary-color); font-weight: 600;">→ Accéder</span>
+        </a>
         <?php if ($acces_tresorerie): ?>
-        <a href="../tresorerie/tresorerie.php" class="stat-card" style="text-decoration: none; color: inherit; display: block;">
-          <h3>💵 Trésorerie</h3>
-          <p style="color: #666; margin-top: 10px;">Gérer les finances et dépenses</p>
+        <a href="../tresorerie/tresorerie.php" class="stat-card" style="text-decoration: none; color: inherit; display: block; cursor: pointer; transition: var(--transition); background: linear-gradient(135deg, #28a745, #20c997); color: white;">
+          <h3 style="color: white;">💵 Trésorerie</h3>
+          <p style="color: rgba(255,255,255,0.9); margin-top: 10px; margin-bottom: 0;">Gérer les finances et dépenses</p>
+          <span style="display: inline-block; margin-top: 10px; color: white; font-weight: 600;">→ Accéder</span>
         </a>
         <?php endif; ?>
         <?php if ($role === 'admin'): ?>
@@ -496,9 +533,9 @@ if ((is_object($table_exists) && method_exists($table_exists, 'num_rows') ? $tab
               $nb_demandes_attente = (is_object($check_demandes) && method_exists($check_demandes, 'fetch_assoc') ? $check_demandes->fetch_assoc() : mysqli_fetch_assoc($check_demandes))['total'] ?? 0;
           }
           ?>
-          <div class="stat-card" style="background: linear-gradient(135deg, #dc3545, #c82333); color: white;">
+          <div class="stat-card" style="background: linear-gradient(135deg, #dc3545, #c82333); color: white; cursor: pointer; transition: var(--transition);">
             <h3 style="color: white;">🔐 Demandes d'accès</h3>
-            <p style="color: rgba(255,255,255,0.9); margin-top: 10px;">
+            <p style="color: rgba(255,255,255,0.9); margin-top: 10px; margin-bottom: 0;">
               <?= $nb_demandes_attente > 0 ? "<strong>$nb_demandes_attente demande(s) en attente</strong>" : "Traitez les demandes des vendeurs pour leur accorder des privilèges supplémentaires." ?>
             </p>
             <a href="../admin/demandes_acces.php" class="btn" style="background: white; color: #dc3545; font-weight: bold; padding: 12px 24px; box-shadow: 0 4px 15px rgba(255,255,255,0.3); margin-top: 15px; display: inline-block; text-decoration: none;">
