@@ -25,8 +25,8 @@ if (isset($_POST['ajouter'])) {
         $id_produit = intval($produits[$i]);
         $qte = intval($quantites[$i]);
         if ($id_produit > 0 && $qte > 0) {
-            $req = $conn->query("SELECT nom, quantite_stock FROM produits WHERE id = $id_produit");
-            $p = (is_object($req) && method_exists($req, 'fetch_assoc') ? $req->fetch_assoc() : mysqli_fetch_assoc($req));
+            $req = mysqli_query($conn, "SELECT nom, quantite_stock FROM produits WHERE id = $id_produit");
+            $p = mysqli_fetch_assoc($req);
             if ($qte > $p['quantite_stock']) {
                 $stock_ok = false;
                 $erreurs_stock[] = "❌ Le produit <strong>" . htmlspecialchars($p['nom']) . "</strong> n’a que <strong>" . $p['quantite_stock'] . "</strong> unités en stock.";
@@ -40,26 +40,26 @@ if (isset($_POST['ajouter'])) {
         foreach ($totaux as $t) $total_general += floatval($t);
 
         $sql_vente = "INSERT INTO ventes (id_client, id_utilisateur, total) VALUES ($id_client, $id_utilisateur, $total_general)";
-        if ($conn->query($sql_vente)) {
-            $id_vente = db_get_insert_id($conn);
+        if (mysqli_query($conn, $sql_vente)) {
+            $id_vente = mysqli_insert_id($conn);
 
             for ($i = 0; $i < count($produits); $i++) {
                 $id_produit = intval($produits[$i]);
                 $qte = intval($quantites[$i]);
                 if ($qte > 0 && $id_produit > 0) {
-                    $req_p = $conn->query("SELECT prix_vente, quantite_stock FROM produits WHERE id = $id_produit");
-                    $p = (is_object($req_p) && method_exists($req_p, 'fetch_assoc') ? $req_p->fetch_assoc() : mysqli_fetch_assoc($req_p));
+                    $req_p = mysqli_query($conn, "SELECT prix_vente, quantite_stock FROM produits WHERE id = $id_produit");
+                    $p = mysqli_fetch_assoc($req_p);
                     $prix_unitaire = $p['prix_vente'];
                     $nouveau_stock = $p['quantite_stock'] - $qte;
 
-                    $conn->query("INSERT INTO details_vente (id_vente, id_produit, quantite, prix_unitaire)
+                    mysqli_query($conn, "INSERT INTO details_vente (id_vente, id_produit, quantite, prix_unitaire)
                                          VALUES ($id_vente, $id_produit, $qte, $prix_unitaire)");
-                    $conn->query("UPDATE produits SET quantite_stock = $nouveau_stock WHERE id = $id_produit");
+                    mysqli_query($conn, "UPDATE produits SET quantite_stock = $nouveau_stock WHERE id = $id_produit");
                 }
             }
             $message = "✅ Vente enregistrée avec succès.";
         } else {
-            $message = "❌ Erreur : " . (isset($GLOBALS['is_postgresql']) && is_object($conn) && get_class($conn) === 'PostgreSQLConnection' ? $conn->error() : mysqli_error($conn));
+            $message = "❌ Erreur : " . mysqli_error($conn);
         }
     }
 }
@@ -67,19 +67,19 @@ if (isset($_POST['ajouter'])) {
 // --- SUPPRESSION D’UNE VENTE ---
 if (isset($_GET['supprimer'])) {
     $id = intval($_GET['supprimer']);
-    $conn->query("DELETE FROM ventes WHERE id = $id");
+    mysqli_query($conn, "DELETE FROM ventes WHERE id = $id");
     header("Location: ventes.php");
     exit();
 }
 
 // --- RÉCUPÉRATION DES DONNÉES ---
-$ventes = $conn->query("SELECT v.id, v.total, v.date_vente, c.nom AS client, u.nom AS vendeur
+$ventes = mysqli_query($conn, "SELECT v.id, v.total, v.date_vente, c.nom AS client, u.nom AS vendeur
                                FROM ventes v
                                LEFT JOIN clients c ON v.id_client = c.id
                                LEFT JOIN utilisateurs u ON v.id_utilisateur = u.id
                                ORDER BY v.id DESC");
-$clients = $conn->query("SELECT id, nom FROM clients ORDER BY nom ASC");
-$produits = $conn->query("SELECT id, nom, prix_vente, quantite_stock FROM produits ORDER BY nom ASC");
+$clients = mysqli_query($conn, "SELECT id, nom FROM clients ORDER BY nom ASC");
+$produits = mysqli_query($conn, "SELECT id, nom, prix_vente, quantite_stock FROM produits ORDER BY nom ASC");
 ?>
 <!DOCTYPE html>
 <html lang="fr">
@@ -165,7 +165,7 @@ function setPrixStock(select) {
         <label>Client :</label>
         <select name="id_client">
             <option value="">-- Aucun client --</option>
-            <?php while ($c = (is_object($clients) && method_exists($clients, 'fetch_assoc') ? $clients->fetch_assoc() : mysqli_fetch_assoc($clients))): ?>
+            <?php while ($c = mysqli_fetch_assoc($clients)): ?>
                 <option value="<?= $c['id'] ?>"><?= htmlspecialchars($c['nom']) ?></option>
             <?php endwhile; ?>
         </select>
@@ -187,7 +187,7 @@ function setPrixStock(select) {
                         <option value="">-- Sélectionner --</option>
                         <?php
                         mysqli_data_seek($produits, 0);
-                        while ($p = (is_object($produits) && method_exists($produits, 'fetch_assoc') ? $produits->fetch_assoc() : mysqli_fetch_assoc($produits))): ?>
+                        while ($p = mysqli_fetch_assoc($produits)): ?>
                             <option value="<?= $p['id'] ?>" data-prix="<?= $p['prix_vente'] ?>" data-stock="<?= $p['quantite_stock'] ?>">
                                 <?= htmlspecialchars($p['nom']) ?> (<?= $p['quantite_stock'] ?> en stock)
                             </option>
@@ -223,7 +223,7 @@ function setPrixStock(select) {
                 </tr>
             </thead>
             <tbody>
-        <?php while ($v = (is_object($ventes) && method_exists($ventes, 'fetch_assoc') ? $ventes->fetch_assoc() : mysqli_fetch_assoc($ventes))): ?>
+        <?php while ($v = mysqli_fetch_assoc($ventes)): ?>
         <tr>
             <td><?= $v['id'] ?></td>
             <td><?= htmlspecialchars($v['client'] ?? "N/A") ?></td>

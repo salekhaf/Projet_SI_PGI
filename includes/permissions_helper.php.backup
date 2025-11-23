@@ -56,12 +56,12 @@ function aPermission($conn, $id_utilisateur, $permission) {
         return false;
     }
     
-    $stmt = $conn->prepare("SELECT id FROM permissions_utilisateurs WHERE id_utilisateur = ? AND permission = ?");
-    $stmt->bind_param("is", $id_utilisateur, $permission);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $has_permission = ((is_object($result) && method_exists($result, 'num_rows') ? $result->num_rows() : mysqli_num_rows($result)) > 0);
-    $stmt->close();
+    $stmt = mysqli_prepare($conn, "SELECT id FROM permissions_utilisateurs WHERE id_utilisateur = ? AND permission = ?");
+    mysqli_stmt_bind_param($stmt, "is", $id_utilisateur, $permission);
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
+    $has_permission = (mysqli_num_rows($result) > 0);
+    mysqli_stmt_close($stmt);
     
     return $has_permission;
 }
@@ -80,15 +80,15 @@ function aAuMoinsUnePermission($conn, $id_utilisateur, $permissions) {
     }
     
     $placeholders = implode(',', array_fill(0, count($permissions), '?'));
-    $stmt = $conn->prepare("SELECT id FROM permissions_utilisateurs WHERE id_utilisateur = ? AND permission IN ($placeholders) LIMIT 1");
+    $stmt = mysqli_prepare($conn, "SELECT id FROM permissions_utilisateurs WHERE id_utilisateur = ? AND permission IN ($placeholders) LIMIT 1");
     
     $types = 'i' . str_repeat('s', count($permissions));
     $params = array_merge([$id_utilisateur], $permissions);
-    $stmt->bind_param($types, ...$params);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $has_permission = ((is_object($result) && method_exists($result, 'num_rows') ? $result->num_rows() : mysqli_num_rows($result)) > 0);
-    $stmt->close();
+    mysqli_stmt_bind_param($stmt, $types, ...$params);
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
+    $has_permission = (mysqli_num_rows($result) > 0);
+    mysqli_stmt_close($stmt);
     
     return $has_permission;
 }
@@ -102,16 +102,16 @@ function getPermissionsUtilisateur($conn, $id_utilisateur) {
         return [];
     }
     
-    $stmt = $conn->prepare("SELECT permission FROM permissions_utilisateurs WHERE id_utilisateur = ?");
-    $stmt->bind_param("i", $id_utilisateur);
-    $stmt->execute();
-    $result = $stmt->get_result();
+    $stmt = mysqli_prepare($conn, "SELECT permission FROM permissions_utilisateurs WHERE id_utilisateur = ?");
+    mysqli_stmt_bind_param($stmt, "i", $id_utilisateur);
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
     
     $permissions = [];
-    while ($row = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result))) {
+    while ($row = mysqli_fetch_assoc($result)) {
         $permissions[] = $row['permission'];
     }
-    $stmt->close();
+    mysqli_stmt_close($stmt);
     
     return $permissions;
 }
@@ -134,7 +134,7 @@ function ajouterPermission($conn, $id_utilisateur, $permission, $id_admin_attrib
             FOREIGN KEY (id_demande_acces) REFERENCES demandes_acces(id) ON DELETE SET NULL,
             UNIQUE KEY unique_permission_user (id_utilisateur, permission)
         )";
-        $conn->query($create_table);
+        mysqli_query($conn, $create_table);
     }
     
     // Vérifier si la permission existe déjà
@@ -142,10 +142,10 @@ function ajouterPermission($conn, $id_utilisateur, $permission, $id_admin_attrib
         return false; // Permission déjà accordée
     }
     
-    $stmt = $conn->prepare("INSERT INTO permissions_utilisateurs (id_utilisateur, permission, id_admin_attribueur, id_demande_acces) VALUES (?, ?, ?, ?)");
-    $stmt->bind_param("isii", $id_utilisateur, $permission, $id_admin_attribueur, $id_demande_acces);
-    $success = $stmt->execute();
-    $stmt->close();
+    $stmt = mysqli_prepare($conn, "INSERT INTO permissions_utilisateurs (id_utilisateur, permission, id_admin_attribueur, id_demande_acces) VALUES (?, ?, ?, ?)");
+    mysqli_stmt_bind_param($stmt, "isii", $id_utilisateur, $permission, $id_admin_attribueur, $id_demande_acces);
+    $success = mysqli_stmt_execute($stmt);
+    mysqli_stmt_close($stmt);
     
     return $success;
 }
@@ -154,10 +154,10 @@ function ajouterPermission($conn, $id_utilisateur, $permission, $id_admin_attrib
  * Supprime une permission d'un utilisateur
  */
 function supprimerPermission($conn, $id_utilisateur, $permission) {
-    $stmt = $conn->prepare("DELETE FROM permissions_utilisateurs WHERE id_utilisateur = ? AND permission = ?");
-    $stmt->bind_param("is", $id_utilisateur, $permission);
-    $success = $stmt->execute();
-    $stmt->close();
+    $stmt = mysqli_prepare($conn, "DELETE FROM permissions_utilisateurs WHERE id_utilisateur = ? AND permission = ?");
+    mysqli_stmt_bind_param($stmt, "is", $id_utilisateur, $permission);
+    $success = mysqli_stmt_execute($stmt);
+    mysqli_stmt_close($stmt);
     
     return $success;
 }
@@ -166,10 +166,10 @@ function supprimerPermission($conn, $id_utilisateur, $permission) {
  * Supprime toutes les permissions d'un utilisateur
  */
 function supprimerToutesPermissions($conn, $id_utilisateur) {
-    $stmt = $conn->prepare("DELETE FROM permissions_utilisateurs WHERE id_utilisateur = ?");
-    $stmt->bind_param("i", $id_utilisateur);
-    $success = $stmt->execute();
-    $stmt->close();
+    $stmt = mysqli_prepare($conn, "DELETE FROM permissions_utilisateurs WHERE id_utilisateur = ?");
+    mysqli_stmt_bind_param($stmt, "i", $id_utilisateur);
+    $success = mysqli_stmt_execute($stmt);
+    mysqli_stmt_close($stmt);
     
     return $success;
 }

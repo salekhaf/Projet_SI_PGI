@@ -11,11 +11,11 @@ function enregistrer_historique($conn, $id_utilisateur, $type_action, $table_con
     $anciennes_json = $anciennes_valeurs ? json_encode($anciennes_valeurs) : null;
     $nouvelles_json = $nouvelles_valeurs ? json_encode($nouvelles_valeurs) : null;
     
-    $stmt = $conn->prepare("INSERT INTO historique (id_utilisateur, type_action, table_concernée, id_element, description, anciennes_valeurs, nouvelles_valeurs) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    $stmt = mysqli_prepare($conn, "INSERT INTO historique (id_utilisateur, type_action, table_concernée, id_element, description, anciennes_valeurs, nouvelles_valeurs) VALUES (?, ?, ?, ?, ?, ?, ?)");
     if ($stmt) {
-        $stmt->bind_param("issssss", $id_utilisateur, $type_action, $table_concernée, $id_element, $description, $anciennes_json, $nouvelles_json);
-        $stmt->execute();
-        $stmt->close();
+        mysqli_stmt_bind_param($stmt, "issssss", $id_utilisateur, $type_action, $table_concernée, $id_element, $description, $anciennes_json, $nouvelles_json);
+        mysqli_stmt_execute($stmt);
+        mysqli_stmt_close($stmt);
         return true;
     }
     return false;

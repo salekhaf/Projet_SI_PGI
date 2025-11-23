@@ -20,15 +20,15 @@ $sql = "SELECT a.id, a.date_achat, a.montant_total,
         FROM achats a
         JOIN fournisseurs f ON a.id_fournisseur = f.id
         WHERE a.id = $id_achat";
-$res = $conn->query($sql);
-$achat = (is_object($res) && method_exists($res, 'fetch_assoc') ? $res->fetch_assoc() : mysqli_fetch_assoc($res));
+$res = mysqli_query($conn, $sql);
+$achat = mysqli_fetch_assoc($res);
 
 if (!$achat) {
     die("❌ Commande introuvable.");
 }
 
 // Récupération des produits achetés
-$details = $conn->query("
+$details = mysqli_query($conn, "
     SELECT p.nom AS produit, d.quantite, d.prix_achat
     FROM details_achat d
     JOIN produits p ON d.id_produit = p.id
@@ -96,7 +96,7 @@ $details = $conn->query("
         </tr>
             </thead>
             <tbody>
-        <?php $total = 0; while ($d = (is_object($details) && method_exists($details, 'fetch_assoc') ? $details->fetch_assoc() : mysqli_fetch_assoc($details))): 
+        <?php $total = 0; while ($d = mysqli_fetch_assoc($details)): 
             $sous_total = $d['prix_achat'] * $d['quantite'];
             $total += $sous_total;
         ?>

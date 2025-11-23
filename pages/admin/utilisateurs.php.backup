@@ -36,33 +36,33 @@ if ($peut_modifier && isset($_POST['changer_role'])) {
     if (in_array($nouveau_role, $roles_autorises)) {
         // Vérifier si c'est le dernier admin
         if ($nouveau_role !== 'admin') {
-            $check_admin = $conn->query("SELECT COUNT(*) as total FROM utilisateurs WHERE role = 'admin'");
-            $nb_admins = (is_object($check_admin) && method_exists($check_admin, 'fetch_assoc') ? $check_admin->fetch_assoc() : mysqli_fetch_assoc($check_admin))['total'];
+            $check_admin = mysqli_query($conn, "SELECT COUNT(*) as total FROM utilisateurs WHERE role = 'admin'");
+            $nb_admins = mysqli_fetch_assoc($check_admin)['total'];
             
             // Vérifier si l'utilisateur cible est admin
-            $check_user = $conn->prepare("SELECT role FROM utilisateurs WHERE id = ?");
-            $check_user->bind_param("i", $id_cible);
-            $check_user->execute();
-            $result_user = $check_user->get_result();
-            $user_data = (is_object($result_user) && method_exists($result_user, 'fetch_assoc') ? $result_user->fetch_assoc() : mysqli_fetch_assoc($result_user));
-            $check_user->close();
+            $check_user = mysqli_prepare($conn, "SELECT role FROM utilisateurs WHERE id = ?");
+            mysqli_stmt_bind_param($check_user, "i", $id_cible);
+            mysqli_stmt_execute($check_user);
+            $result_user = mysqli_stmt_get_result($check_user);
+            $user_data = mysqli_fetch_assoc($result_user);
+            mysqli_stmt_close($check_user);
             
             if ($user_data['role'] === 'admin' && $nb_admins <= 1) {
                 $message = "⚠️ Impossible de retirer le rôle admin : c'est le dernier administrateur.";
             } else {
                 // Récupérer l'ancien rôle pour l'historique
-                $stmt_old = $conn->prepare("SELECT nom, role FROM utilisateurs WHERE id = ?");
-                $stmt_old->bind_param("i", $id_cible);
-                $stmt_old->execute();
-                $result_old = $stmt_old->get_result();
-                $ancien = (is_object($result_old) && method_exists($result_old, 'fetch_assoc') ? $result_old->fetch_assoc() : mysqli_fetch_assoc($result_old));
-                $stmt_old->close();
+                $stmt_old = mysqli_prepare($conn, "SELECT nom, role FROM utilisateurs WHERE id = ?");
+                mysqli_stmt_bind_param($stmt_old, "i", $id_cible);
+                mysqli_stmt_execute($stmt_old);
+                $result_old = mysqli_stmt_get_result($stmt_old);
+                $ancien = mysqli_fetch_assoc($result_old);
+                mysqli_stmt_close($stmt_old);
                 
                 // Mise à jour avec prepared statement
-                $stmt = $conn->prepare("UPDATE utilisateurs SET role = ? WHERE id = ?");
-                $stmt->bind_param("si", $nouveau_role, $id_cible);
+                $stmt = mysqli_prepare($conn, "UPDATE utilisateurs SET role = ? WHERE id = ?");
+                mysqli_stmt_bind_param($stmt, "si", $nouveau_role, $id_cible);
                 
-                if ($stmt->execute()) {
+                if (mysqli_stmt_execute($stmt)) {
                     // Si le nouveau rôle est trésorier, accorder automatiquement l'accès à la trésorerie
                     if ($nouveau_role === 'tresorier') {
                         // Vérifier si la permission n'existe pas déjà
@@ -84,24 +84,24 @@ if ($peut_modifier && isset($_POST['changer_role'])) {
                         $message .= " L'accès à la trésorerie a été accordé automatiquement.";
                     }
                 } else {
-                    $message = "❌ Erreur SQL : " . (isset($GLOBALS['is_postgresql']) && is_object($conn) && get_class($conn) === 'PostgreSQLConnection' ? $conn->error() : mysqli_error($conn));
+                    $message = "❌ Erreur SQL : " . mysqli_error($conn);
                 }
-                $stmt->close();
+                mysqli_stmt_close($stmt);
             }
         } else {
             // Récupérer l'ancien rôle pour l'historique
-            $stmt_old = $conn->prepare("SELECT nom, role FROM utilisateurs WHERE id = ?");
-            $stmt_old->bind_param("i", $id_cible);
-            $stmt_old->execute();
-            $result_old = $stmt_old->get_result();
-            $ancien = (is_object($result_old) && method_exists($result_old, 'fetch_assoc') ? $result_old->fetch_assoc() : mysqli_fetch_assoc($result_old));
-            $stmt_old->close();
+            $stmt_old = mysqli_prepare($conn, "SELECT nom, role FROM utilisateurs WHERE id = ?");
+            mysqli_stmt_bind_param($stmt_old, "i", $id_cible);
+            mysqli_stmt_execute($stmt_old);
+            $result_old = mysqli_stmt_get_result($stmt_old);
+            $ancien = mysqli_fetch_assoc($result_old);
+            mysqli_stmt_close($stmt_old);
             
             // Mise à jour avec prepared statement
-            $stmt = $conn->prepare("UPDATE utilisateurs SET role = ? WHERE id = ?");
-            $stmt->bind_param("si", $nouveau_role, $id_cible);
+            $stmt = mysqli_prepare($conn, "UPDATE utilisateurs SET role = ? WHERE id = ?");
+            mysqli_stmt_bind_param($stmt, "si", $nouveau_role, $id_cible);
             
-            if ($stmt->execute()) {
+            if (mysqli_stmt_execute($stmt)) {
                 // Si le nouveau rôle est trésorier, accorder automatiquement l'accès à la trésorerie
                 if ($nouveau_role === 'tresorier') {
                     // Vérifier si la permission n'existe pas déjà
@@ -123,9 +123,9 @@ if ($peut_modifier && isset($_POST['changer_role'])) {
                     $message .= " L'accès à la trésorerie a été accordé automatiquement.";
                 }
         } else {
-            $message = "❌ Erreur SQL : " . (isset($GLOBALS['is_postgresql']) && is_object($conn) && get_class($conn) === 'PostgreSQLConnection' ? $conn->error() : mysqli_error($conn));
+            $message = "❌ Erreur SQL : " . mysqli_error($conn);
             }
-            $stmt->close();
+            mysqli_stmt_close($stmt);
         }
     } else {
         $message = "⚠️ Rôle non autorisé.";
@@ -161,19 +161,19 @@ $where_clause = !empty($where_conditions) ? "WHERE " . implode(" AND ", $where_c
 // Statistiques
 $stats_query = "SELECT role, COUNT(*) as total FROM utilisateurs $where_clause GROUP BY role";
 if (!empty($params)) {
-    $stmt_stats = $conn->prepare($stats_query);
+    $stmt_stats = mysqli_prepare($conn, $stats_query);
     if ($types) {
-        $stmt_stats->bind_param($types, ...$params);
+        mysqli_stmt_bind_param($stmt_stats, $types, ...$params);
     }
-    $stmt_stats->execute();
-    $stats_result = $stmt_stats->get_result();
+    mysqli_stmt_execute($stmt_stats);
+    $stats_result = mysqli_stmt_get_result($stmt_stats);
 } else {
-    $stats_result = $conn->query($stats_query);
+    $stats_result = mysqli_query($conn, $stats_query);
 }
 
 $stats = [];
 $total_users = 0;
-while ($stat = (is_object($stats_result) && method_exists($stats_result, 'fetch_assoc') ? $stats_result->fetch_assoc() : mysqli_fetch_assoc($stats_result))) {
+while ($stat = mysqli_fetch_assoc($stats_result)) {
     $stats[$stat['role']] = $stat['total'];
     $total_users += $stat['total'];
 }
@@ -181,14 +181,14 @@ while ($stat = (is_object($stats_result) && method_exists($stats_result, 'fetch_
 // Liste des utilisateurs
 $query = "SELECT id, nom, email, role, date_creation FROM utilisateurs $where_clause ORDER BY id DESC";
 if (!empty($params)) {
-    $stmt = $conn->prepare($query);
+    $stmt = mysqli_prepare($conn, $query);
     if ($types) {
-        $stmt->bind_param($types, ...$params);
+        mysqli_stmt_bind_param($stmt, $types, ...$params);
     }
-    $stmt->execute();
-    $result = $stmt->get_result();
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
 } else {
-    $result = $conn->query($query);
+    $result = mysqli_query($conn, $query);
 }
 ?>
 <!DOCTYPE html>
@@ -296,8 +296,8 @@ if (!empty($params)) {
             </thead>
             <tbody>
                 <?php 
-                if ((is_object($result) && method_exists($result, 'num_rows') ? $result->num_rows() : mysqli_num_rows($result)) > 0):
-                    while ($user = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result))): 
+                if (mysqli_num_rows($result) > 0):
+                    while ($user = mysqli_fetch_assoc($result)): 
                         // Badge coloré selon le rôle (utilise role_helper.php)
                 ?>
         <tr>

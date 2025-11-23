@@ -21,18 +21,18 @@ $sql_vente = "SELECT v.id, v.date_vente, v.total,
               LEFT JOIN clients c ON v.id_client = c.id
               LEFT JOIN utilisateurs u ON v.id_utilisateur = u.id
               WHERE v.id = $id_vente";
-$vente = $conn->query($sql_vente);
-if ((is_object($vente) && method_exists($vente, 'num_rows') ? $vente->num_rows() : mysqli_num_rows($vente)) == 0) {
+$vente = mysqli_query($conn, $sql_vente);
+if (mysqli_num_rows($vente) == 0) {
     die("Vente introuvable !");
 }
-$vente = (is_object($vente) && method_exists($vente, 'fetch_assoc') ? $vente->fetch_assoc() : mysqli_fetch_assoc($vente));
+$vente = mysqli_fetch_assoc($vente);
 
 // --- Récupérer les détails ---
 $sql_details = "SELECT d.quantite, d.prix_unitaire, p.nom 
                 FROM details_vente d
                 JOIN produits p ON d.id_produit = p.id
                 WHERE d.id_vente = $id_vente";
-$details = $conn->query($sql_details);
+$details = mysqli_query($conn, $sql_details);
 ?>
 <!DOCTYPE html>
 <html lang="fr">
@@ -103,7 +103,7 @@ $details = $conn->query($sql_details);
             </thead>
             <tbody>
         <?php $total_calcule = 0; ?>
-        <?php while ($d = (is_object($details) && method_exists($details, 'fetch_assoc') ? $details->fetch_assoc() : mysqli_fetch_assoc($details))): 
+        <?php while ($d = mysqli_fetch_assoc($details)): 
             $sous_total = $d['quantite'] * $d['prix_unitaire'];
             $total_calcule += $sous_total;
         ?>

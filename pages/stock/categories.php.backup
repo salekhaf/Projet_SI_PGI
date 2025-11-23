@@ -17,16 +17,16 @@ $message = "";
 if ($peut_modifier && isset($_POST['ajouter'])) {
     $nom = trim($_POST['nom']);
     if ($nom !== "") {
-        $stmt = $conn->prepare("INSERT INTO categories (nom) VALUES (?)");
-        $stmt->bind_param("s", $nom);
-        if ($stmt->execute()) {
-            $id_cat = db_get_insert_id($conn);
+        $stmt = mysqli_prepare($conn, "INSERT INTO categories (nom) VALUES (?)");
+        mysqli_stmt_bind_param($stmt, "s", $nom);
+        if (mysqli_stmt_execute($stmt)) {
+            $id_cat = mysqli_insert_id($conn);
             enregistrer_historique($conn, $id_utilisateur, 'ajout', 'categories', $id_cat, "Ajout de la catégorie: $nom");
             $message = "✅ Catégorie ajoutée avec succès.";
         } else {
-            $message = "❌ Erreur : " . (isset($GLOBALS['is_postgresql']) && is_object($conn) && get_class($conn) === 'PostgreSQLConnection' ? $conn->error() : mysqli_error($conn));
+            $message = "❌ Erreur : " . mysqli_error($conn);
         }
-        $stmt->close();
+        mysqli_stmt_close($stmt);
     } else {
         $message = "⚠️ Le nom de la catégorie est obligatoire.";
     }
@@ -37,53 +37,53 @@ if ($peut_modifier && isset($_POST['modifier'])) {
     $id = intval($_POST['id']);
     $nom = trim($_POST['nom']);
     
-    $stmt = $conn->prepare("SELECT * FROM categories WHERE id = ?");
-    $stmt->bind_param("i", $id);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $ancien = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result));
-    $stmt->close();
+    $stmt = mysqli_prepare($conn, "SELECT * FROM categories WHERE id = ?");
+    mysqli_stmt_bind_param($stmt, "i", $id);
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
+    $ancien = mysqli_fetch_assoc($result);
+    mysqli_stmt_close($stmt);
     
-    $stmt = $conn->prepare("UPDATE categories SET nom = ? WHERE id = ?");
-    $stmt->bind_param("si", $nom, $id);
-    if ($stmt->execute()) {
+    $stmt = mysqli_prepare($conn, "UPDATE categories SET nom = ? WHERE id = ?");
+    mysqli_stmt_bind_param($stmt, "si", $nom, $id);
+    if (mysqli_stmt_execute($stmt)) {
         enregistrer_historique($conn, $id_utilisateur, 'modification', 'categories', $id, "Modification de la catégorie: $nom", $ancien, ['nom' => $nom]);
         $message = "✅ Catégorie modifiée avec succès.";
     } else {
-        $message = "❌ Erreur : " . (isset($GLOBALS['is_postgresql']) && is_object($conn) && get_class($conn) === 'PostgreSQLConnection' ? $conn->error() : mysqli_error($conn));
+        $message = "❌ Erreur : " . mysqli_error($conn);
     }
-    $stmt->close();
+    mysqli_stmt_close($stmt);
 }
 
 // --- SUPPRESSION D'UNE CATÉGORIE ---
 if ($peut_modifier && isset($_GET['supprimer'])) {
     $id = intval($_GET['supprimer']);
-    $stmt = $conn->prepare("SELECT * FROM categories WHERE id = ?");
-    $stmt->bind_param("i", $id);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $cat = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result));
-    $stmt->close();
+    $stmt = mysqli_prepare($conn, "SELECT * FROM categories WHERE id = ?");
+    mysqli_stmt_bind_param($stmt, "i", $id);
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
+    $cat = mysqli_fetch_assoc($result);
+    mysqli_stmt_close($stmt);
     
-    $conn->query("DELETE FROM categories WHERE id = $id");
+    mysqli_query($conn, "DELETE FROM categories WHERE id = $id");
     enregistrer_historique($conn, $id_utilisateur, 'suppression', 'categories', $id, "Suppression de la catégorie: " . $cat['nom'], $cat, null);
     header("Location: categories.php");
     exit();
 }
 
 // --- RÉCUPÉRATION DES CATÉGORIES ---
-$result = $conn->query("SELECT c.*, COUNT(p.id) as nb_produits FROM categories c LEFT JOIN produits p ON c.id = p.id_categorie GROUP BY c.id ORDER BY c.nom ASC");
+$result = mysqli_query($conn, "SELECT c.*, COUNT(p.id) as nb_produits FROM categories c LEFT JOIN produits p ON c.id = p.id_categorie GROUP BY c.id ORDER BY c.nom ASC");
 
 // Catégorie à modifier
 $cat_edit = null;
 if (isset($_GET['edit']) && $peut_modifier) {
     $id_edit = intval($_GET['edit']);
-    $stmt = $conn->prepare("SELECT * FROM categories WHERE id = ?");
-    $stmt->bind_param("i", $id_edit);
-    $stmt->execute();
-    $result_edit = $stmt->get_result();
-    $cat_edit = (is_object($result_edit) && method_exists($result_edit, 'fetch_assoc') ? $result_edit->fetch_assoc() : mysqli_fetch_assoc($result_edit));
-    $stmt->close();
+    $stmt = mysqli_prepare($conn, "SELECT * FROM categories WHERE id = ?");
+    mysqli_stmt_bind_param($stmt, "i", $id_edit);
+    mysqli_stmt_execute($stmt);
+    $result_edit = mysqli_stmt_get_result($stmt);
+    $cat_edit = mysqli_fetch_assoc($result_edit);
+    mysqli_stmt_close($stmt);
 }
 ?>
 <!DOCTYPE html>
@@ -160,7 +160,7 @@ if (isset($_GET['edit']) && $peut_modifier) {
                 </tr>
             </thead>
             <tbody>
-                <?php while ($row = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result))): ?>
+                <?php while ($row = mysqli_fetch_assoc($result)): ?>
                 <tr>
                     <td><?= $row['id'] ?></td>
                     <td><?= htmlspecialchars($row['nom']) ?></td>

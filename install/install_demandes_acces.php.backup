@@ -9,9 +9,9 @@ include('db_conn.php');
 echo "<h2>Installation de la table demandes_acces</h2>";
 
 // Vérifier si la table existe déjà
-$check = $conn->query("SHOW TABLES LIKE 'demandes_acces'");
+$check = mysqli_query($conn, "SHOW TABLES LIKE 'demandes_acces'");
 
-if ((is_object($check) && method_exists($check, 'num_rows') ? $check->num_rows() : mysqli_num_rows($check)) > 0) {
+if (mysqli_num_rows($check) > 0) {
     echo "<p style='color: orange;'>⚠️ La table 'demandes_acces' existe déjà.</p>";
 } else {
     // Créer la table
@@ -31,16 +31,16 @@ if ((is_object($check) && method_exists($check, 'num_rows') ? $check->num_rows()
         FOREIGN KEY (id_admin_approbateur) REFERENCES utilisateurs(id) ON DELETE SET NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci";
     
-    if ($conn->query($sql)) {
+    if (mysqli_query($conn, $sql)) {
         // Créer les index
-        $conn->query("CREATE INDEX idx_statut ON demandes_acces(statut)");
-        $conn->query("CREATE INDEX idx_utilisateur ON demandes_acces(id_utilisateur)");
+        mysqli_query($conn, "CREATE INDEX idx_statut ON demandes_acces(statut)");
+        mysqli_query($conn, "CREATE INDEX idx_utilisateur ON demandes_acces(id_utilisateur)");
         
         echo "<p style='color: green;'>✅ Table 'demandes_acces' créée avec succès !</p>";
         echo "<p>Vous pouvez maintenant utiliser le système de demandes d'accès.</p>";
         echo "<p><a href='index.php'>Retour au tableau de bord</a></p>";
     } else {
-        echo "<p style='color: red;'>❌ Erreur lors de la création : " . (isset($GLOBALS['is_postgresql']) && is_object($conn) && get_class($conn) === 'PostgreSQLConnection' ? $conn->error() : mysqli_error($conn)) . "</p>";
+        echo "<p style='color: red;'>❌ Erreur lors de la création : " . mysqli_error($conn) . "</p>";
     }
 }
 

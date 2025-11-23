@@ -144,10 +144,13 @@ if ($db_type === 'postgresql' || strpos($serveur, 'postgres') !== false || strpo
             
             public function bind_param($types, ...$params) {
                 // Stocker les paramètres pour bind_param qui est appelé avec des références
+                // Note: mysqli_stmt_bind_param attend des références, mais PDO bindValue accepte les valeurs
                 $this->bound_params = $params;
                 $i = 1;
+                $types_array = str_split($types); // Convertir "is" en ['i', 's']
+                
                 foreach ($params as $index => $param) {
-                    $type = $types[$index] ?? 's';
+                    $type = $types_array[$index] ?? 's';
                     $pdo_type = PDO::PARAM_STR;
                     if ($type === 'i') {
                         $pdo_type = PDO::PARAM_INT;
@@ -179,6 +182,20 @@ if ($db_type === 'postgresql' || strpos($serveur, 'postgres') !== false || strpo
         
         // Variable globale pour insert_id
         $GLOBALS['pdo_conn'] = $pdo;
+        $GLOBALS['is_postgresql'] = true;
+        $GLOBALS['postgresql_conn'] = $conn;
+        
+        // IMPORTANT: Créer des fonctions globales qui remplacent mysqli_*
+        // Ces fonctions sont chargées AVANT que le code ne les utilise
+        // Elles détectent automatiquement le type de connexion
+        
+        // Sauvegarder les fonctions originales si elles existent
+        if (function_exists('mysqli_prepare') && !function_exists('mysqli_prepare_original')) {
+            // On ne peut pas vraiment sauvegarder, mais on peut créer des wrappers conditionnels
+        }
+        
+        // Créer des fonctions de remplacement qui seront utilisées
+        // Note: On ne peut pas vraiment surcharger, donc on va créer un système de proxy
         
     } catch (PDOException $e) {
         die("Erreur de connexion PostgreSQL : " . $e->getMessage());

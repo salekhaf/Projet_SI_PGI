@@ -35,25 +35,25 @@ if ($peut_ajouter && isset($_POST['ajouter_produit'])) {
     $fournisseur_id = isset($_POST['fournisseur_id']) && $_POST['fournisseur_id'] != '' ? intval($_POST['fournisseur_id']) : null;
 
     if (!empty($nom_produit) && $prix_achat > 0 && $prix_vente > 0) {
-        $stmt = $conn->prepare("SELECT id FROM produits WHERE LOWER(nom) = LOWER(?)");
-        $stmt->bind_param("s", $nom_produit);
-        $stmt->execute();
-        $check = $stmt->get_result();
+        $stmt = mysqli_prepare($conn, "SELECT id FROM produits WHERE LOWER(nom) = LOWER(?)");
+        mysqli_stmt_bind_param($stmt, "s", $nom_produit);
+        mysqli_stmt_execute($stmt);
+        $check = mysqli_stmt_get_result($stmt);
         
-        if ((is_object($check) && method_exists($check, 'num_rows') ? $check->num_rows() : mysqli_num_rows($check)) > 0) {
+        if (mysqli_num_rows($check) > 0) {
             $message = "⚠️ Ce produit existe déjà.";
         } else {
-            $stmt = $conn->prepare("INSERT INTO produits (nom, prix_achat, prix_vente, quantite_stock, id_categorie, fournisseur_id) VALUES (?, ?, ?, ?, ?, ?)");
-            $stmt->bind_param("sddiii", $nom_produit, $prix_achat, $prix_vente, $quantite_stock, $id_categorie, $fournisseur_id);
+            $stmt = mysqli_prepare($conn, "INSERT INTO produits (nom, prix_achat, prix_vente, quantite_stock, id_categorie, fournisseur_id) VALUES (?, ?, ?, ?, ?, ?)");
+            mysqli_stmt_bind_param($stmt, "sddiii", $nom_produit, $prix_achat, $prix_vente, $quantite_stock, $id_categorie, $fournisseur_id);
             
-            if ($stmt->execute()) {
-                $id_produit = db_get_insert_id($conn);
+            if (mysqli_stmt_execute($stmt)) {
+                $id_produit = mysqli_insert_id($conn);
                 enregistrer_historique($conn, $id_utilisateur, 'ajout', 'produits', $id_produit, "Ajout du produit: $nom_produit", null, ['nom' => $nom_produit, 'prix_achat' => $prix_achat, 'prix_vente' => $prix_vente]);
                 $message = "✅ Nouveau produit ajouté avec succès.";
             } else {
-                $message = "❌ Erreur SQL : " . (isset($GLOBALS['is_postgresql']) && is_object($conn) && get_class($conn) === 'PostgreSQLConnection' ? $conn->error() : mysqli_error($conn));
+                $message = "❌ Erreur SQL : " . mysqli_error($conn);
             }
-            $stmt->close();
+            mysqli_stmt_close($stmt);
         }
     } else {
         $message = "⚠️ Veuillez remplir tous les champs correctement.";
@@ -65,12 +65,12 @@ if ($peut_modifier && isset($_POST['modifier_produit'])) {
     $id_produit = intval($_POST['id_produit']);
     
     // Récupérer les anciennes valeurs
-    $stmt = $conn->prepare("SELECT * FROM produits WHERE id = ?");
-    $stmt->bind_param("i", $id_produit);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $ancien = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result));
-    $stmt->close();
+    $stmt = mysqli_prepare($conn, "SELECT * FROM produits WHERE id = ?");
+    mysqli_stmt_bind_param($stmt, "i", $id_produit);
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
+    $ancien = mysqli_fetch_assoc($result);
+    mysqli_stmt_close($stmt);
     
     $nom_produit = trim($_POST['nom']);
     $prix_achat = floatval($_POST['prix_achat']);
@@ -79,16 +79,16 @@ if ($peut_modifier && isset($_POST['modifier_produit'])) {
     $id_categorie = isset($_POST['id_categorie']) && $_POST['id_categorie'] != '' ? intval($_POST['id_categorie']) : null;
     $fournisseur_id = isset($_POST['fournisseur_id']) && $_POST['fournisseur_id'] != '' ? intval($_POST['fournisseur_id']) : null;
     
-    $stmt = $conn->prepare("UPDATE produits SET nom = ?, prix_achat = ?, prix_vente = ?, quantite_stock = ?, id_categorie = ?, fournisseur_id = ? WHERE id = ?");
-    $stmt->bind_param("sddiiii", $nom_produit, $prix_achat, $prix_vente, $quantite_stock, $id_categorie, $fournisseur_id, $id_produit);
+    $stmt = mysqli_prepare($conn, "UPDATE produits SET nom = ?, prix_achat = ?, prix_vente = ?, quantite_stock = ?, id_categorie = ?, fournisseur_id = ? WHERE id = ?");
+    mysqli_stmt_bind_param($stmt, "sddiiii", $nom_produit, $prix_achat, $prix_vente, $quantite_stock, $id_categorie, $fournisseur_id, $id_produit);
     
-    if ($stmt->execute()) {
+    if (mysqli_stmt_execute($stmt)) {
         enregistrer_historique($conn, $id_utilisateur, 'modification', 'produits', $id_produit, "Modification du produit: $nom_produit", $ancien, ['nom' => $nom_produit, 'prix_achat' => $prix_achat, 'prix_vente' => $prix_vente, 'quantite_stock' => $quantite_stock]);
         $message = "✅ Produit modifié avec succès.";
     } else {
-        $message = "❌ Erreur lors de la modification : " . (isset($GLOBALS['is_postgresql']) && is_object($conn) && get_class($conn) === 'PostgreSQLConnection' ? $conn->error() : mysqli_error($conn));
+        $message = "❌ Erreur lors de la modification : " . mysqli_error($conn);
     }
-    $stmt->close();
+    mysqli_stmt_close($stmt);
 }
 
 // --- EXPORT CSV ---
@@ -106,9 +106,9 @@ if (isset($_GET['export']) && $_GET['export'] == 'csv') {
               LEFT JOIN categories c ON p.id_categorie = c.id 
               LEFT JOIN fournisseurs f ON p.fournisseur_id = f.id 
               ORDER BY p.nom ASC";
-    $result = $conn->query($query);
+    $result = mysqli_query($conn, $query);
     
-    while ($row = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result))) {
+    while ($row = mysqli_fetch_assoc($result)) {
         fputcsv($output, [
             $row['id'],
             $row['nom'],
@@ -154,17 +154,17 @@ $where_clause = !empty($where_conditions) ? "WHERE " . implode(" AND ", $where_c
 // Compte total pour pagination
 $count_query = "SELECT COUNT(*) as total FROM produits p $where_clause";
 if (!empty($params)) {
-    $stmt = $conn->prepare($count_query);
+    $stmt = mysqli_prepare($conn, $count_query);
     if ($types) {
-        $stmt->bind_param($types, ...$params);
+        mysqli_stmt_bind_param($stmt, $types, ...$params);
     }
-    $stmt->execute();
-    $count_result = $stmt->get_result();
-    $total_rows = (is_object($count_result) && method_exists($count_result, 'fetch_assoc') ? $count_result->fetch_assoc() : mysqli_fetch_assoc($count_result))['total'];
-    $stmt->close();
+    mysqli_stmt_execute($stmt);
+    $count_result = mysqli_stmt_get_result($stmt);
+    $total_rows = mysqli_fetch_assoc($count_result)['total'];
+    mysqli_stmt_close($stmt);
 } else {
-    $count_result = $conn->query($count_query);
-    $total_rows = (is_object($count_result) && method_exists($count_result, 'fetch_assoc') ? $count_result->fetch_assoc() : mysqli_fetch_assoc($count_result))['total'];
+    $count_result = mysqli_query($conn, $count_query);
+    $total_rows = mysqli_fetch_assoc($count_result)['total'];
 }
 $total_pages = ceil($total_rows / $per_page);
 
@@ -181,27 +181,27 @@ $params[] = $per_page;
 $params[] = $offset;
 $types .= "ii";
 
-$stmt = $conn->prepare($query);
+$stmt = mysqli_prepare($conn, $query);
 if ($types) {
-    $stmt->bind_param($types, ...$params);
+    mysqli_stmt_bind_param($stmt, $types, ...$params);
 }
-$stmt->execute();
-$result = $stmt->get_result();
+mysqli_stmt_execute($stmt);
+$result = mysqli_stmt_get_result($stmt);
 
 // Récupérer les catégories et fournisseurs pour les formulaires
-$categories = $conn->query("SELECT * FROM categories ORDER BY nom ASC");
-$fournisseurs = $conn->query("SELECT * FROM fournisseurs ORDER BY nom ASC");
+$categories = mysqli_query($conn, "SELECT * FROM categories ORDER BY nom ASC");
+$fournisseurs = mysqli_query($conn, "SELECT * FROM fournisseurs ORDER BY nom ASC");
 
 // Produit à modifier (si demandé)
 $produit_edit = null;
 if (isset($_GET['edit']) && $peut_modifier) {
     $id_edit = intval($_GET['edit']);
-    $stmt = $conn->prepare("SELECT * FROM produits WHERE id = ?");
-    $stmt->bind_param("i", $id_edit);
-    $stmt->execute();
-    $result_edit = $stmt->get_result();
-    $produit_edit = (is_object($result_edit) && method_exists($result_edit, 'fetch_assoc') ? $result_edit->fetch_assoc() : mysqli_fetch_assoc($result_edit));
-    $stmt->close();
+    $stmt = mysqli_prepare($conn, "SELECT * FROM produits WHERE id = ?");
+    mysqli_stmt_bind_param($stmt, "i", $id_edit);
+    mysqli_stmt_execute($stmt);
+    $result_edit = mysqli_stmt_get_result($stmt);
+    $produit_edit = mysqli_fetch_assoc($result_edit);
+    mysqli_stmt_close($stmt);
 }
 ?>
 <!DOCTYPE html>
@@ -251,7 +251,7 @@ if (isset($_GET['edit']) && $peut_modifier) {
                 <option value="0">Toutes les catégories</option>
                 <?php
                 mysqli_data_seek($categories, 0);
-                while ($cat = (is_object($categories) && method_exists($categories, 'fetch_assoc') ? $categories->fetch_assoc() : mysqli_fetch_assoc($categories))):
+                while ($cat = mysqli_fetch_assoc($categories)):
                 ?>
                     <option value="<?= $cat['id'] ?>" <?= $filtre_categorie == $cat['id'] ? 'selected' : '' ?>>
                         <?= htmlspecialchars($cat['nom']) ?>
@@ -301,7 +301,7 @@ if (isset($_GET['edit']) && $peut_modifier) {
                 <option value="">-- Catégorie --</option>
                 <?php
                 mysqli_data_seek($categories, 0);
-                while ($cat = (is_object($categories) && method_exists($categories, 'fetch_assoc') ? $categories->fetch_assoc() : mysqli_fetch_assoc($categories))):
+                while ($cat = mysqli_fetch_assoc($categories)):
                 ?>
                     <option value="<?= $cat['id'] ?>" <?= ($produit_edit && $produit_edit['id_categorie'] == $cat['id']) ? 'selected' : '' ?>>
                         <?= htmlspecialchars($cat['nom']) ?>
@@ -315,7 +315,7 @@ if (isset($_GET['edit']) && $peut_modifier) {
                 <option value="">-- Fournisseur --</option>
                 <?php
                 mysqli_data_seek($fournisseurs, 0);
-                while ($four = (is_object($fournisseurs) && method_exists($fournisseurs, 'fetch_assoc') ? $fournisseurs->fetch_assoc() : mysqli_fetch_assoc($fournisseurs))):
+                while ($four = mysqli_fetch_assoc($fournisseurs)):
                 ?>
                     <option value="<?= $four['id'] ?>" <?= ($produit_edit && $produit_edit['fournisseur_id'] == $four['id']) ? 'selected' : '' ?>>
                         <?= htmlspecialchars($four['nom']) ?>
@@ -348,8 +348,8 @@ if (isset($_GET['edit']) && $peut_modifier) {
         </thead>
         <tbody>
         <?php 
-        if ((is_object($result) && method_exists($result, 'num_rows') ? $result->num_rows() : mysqli_num_rows($result)) > 0):
-            while ($p = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result))): 
+        if (mysqli_num_rows($result) > 0):
+            while ($p = mysqli_fetch_assoc($result)): 
             $class = "";
             if ($p['quantite_stock'] <= 0) $class = "critical-stock";
             elseif ($p['quantite_stock'] < 10) $class = "low-stock";

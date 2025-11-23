@@ -11,8 +11,8 @@ function export_excel($conn, $query, $filename, $headers) {
     }
     echo '</tr>';
     
-    $result = $conn->query($query);
-    while ($row = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result))) {
+    $result = mysqli_query($conn, $query);
+    while ($row = mysqli_fetch_assoc($result)) {
         echo '<tr>';
         foreach ($row as $cell) {
             echo '<td>' . htmlspecialchars($cell) . '</td>';

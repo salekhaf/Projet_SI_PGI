@@ -15,16 +15,16 @@ $sql = "CREATE TABLE IF NOT EXISTS permissions_utilisateurs (
     UNIQUE KEY unique_permission_user (id_utilisateur, permission)
 )";
 
-if ($conn->query($sql)) {
+if (mysqli_query($conn, $sql)) {
     echo "✅ Table 'permissions_utilisateurs' créée avec succès !\n";
     
     // Créer les index
-    $conn->query("CREATE INDEX IF NOT EXISTS idx_permissions_user ON permissions_utilisateurs(id_utilisateur)");
-    $conn->query("CREATE INDEX IF NOT EXISTS idx_permissions_permission ON permissions_utilisateurs(permission)");
+    mysqli_query($conn, "CREATE INDEX IF NOT EXISTS idx_permissions_user ON permissions_utilisateurs(id_utilisateur)");
+    mysqli_query($conn, "CREATE INDEX IF NOT EXISTS idx_permissions_permission ON permissions_utilisateurs(permission)");
     
     echo "✅ Index créés avec succès !\n";
 } else {
-    echo "❌ Erreur lors de la création : " . (isset($GLOBALS['is_postgresql']) && is_object($conn) && get_class($conn) === 'PostgreSQLConnection' ? $conn->error() : mysqli_error($conn)) . "\n";
+    echo "❌ Erreur lors de la création : " . mysqli_error($conn) . "\n";
 }
 
 mysqli_close($conn);

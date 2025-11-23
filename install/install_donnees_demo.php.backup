@@ -10,7 +10,7 @@ echo "<h2>📦 Installation des données de démonstration</h2>";
 echo "<p>Insertion en cours...</p>";
 
 // Désactiver les vérifications de clés étrangères temporairement
-$conn->query("SET FOREIGN_KEY_CHECKS = 0");
+mysqli_query($conn, "SET FOREIGN_KEY_CHECKS = 0");
 
 // =====================================================
 // Catégories supplémentaires
@@ -22,17 +22,17 @@ $categories = [
 
 $categorie_ids = [];
 foreach ($categories as $cat) {
-    $stmt = $conn->prepare("INSERT INTO categories (nom) VALUES (?) ON DUPLICATE KEY UPDATE nom=nom");
-    $stmt->bind_param("s", $cat);
-    $stmt->execute();
-    $categorie_ids[$cat] = db_get_insert_id($conn);
+    $stmt = mysqli_prepare($conn, "INSERT INTO categories (nom) VALUES (?) ON DUPLICATE KEY UPDATE nom=nom");
+    mysqli_stmt_bind_param($stmt, "s", $cat);
+    mysqli_stmt_execute($stmt);
+    $categorie_ids[$cat] = mysqli_insert_id($conn);
     if ($categorie_ids[$cat] == 0) {
         // Récupérer l'ID existant
-        $result = $conn->query("SELECT id FROM categories WHERE nom = '$cat'");
-        $row = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result));
+        $result = mysqli_query($conn, "SELECT id FROM categories WHERE nom = '$cat'");
+        $row = mysqli_fetch_assoc($result);
         $categorie_ids[$cat] = $row['id'];
     }
-    $stmt->close();
+    mysqli_stmt_close($stmt);
 }
 echo "✅ Catégories insérées<br>";
 
@@ -51,16 +51,16 @@ $fournisseurs = [
 
 $fournisseur_ids = [];
 foreach ($fournisseurs as $four) {
-    $stmt = $conn->prepare("INSERT INTO fournisseurs (nom, telephone, email, adresse) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE nom=nom");
-    $stmt->bind_param("ssss", $four[0], $four[1], $four[2], $four[3]);
-    $stmt->execute();
-    $fournisseur_ids[] = db_get_insert_id($conn);
+    $stmt = mysqli_prepare($conn, "INSERT INTO fournisseurs (nom, telephone, email, adresse) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE nom=nom");
+    mysqli_stmt_bind_param($stmt, "ssss", $four[0], $four[1], $four[2], $four[3]);
+    mysqli_stmt_execute($stmt);
+    $fournisseur_ids[] = mysqli_insert_id($conn);
     if (end($fournisseur_ids) == 0) {
-        $result = $conn->query("SELECT id FROM fournisseurs WHERE nom = '{$four[0]}'");
-        $row = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result));
+        $result = mysqli_query($conn, "SELECT id FROM fournisseurs WHERE nom = '{$four[0]}'");
+        $row = mysqli_fetch_assoc($result);
         $fournisseur_ids[count($fournisseur_ids) - 1] = $row['id'];
     }
-    $stmt->close();
+    mysqli_stmt_close($stmt);
 }
 echo "✅ Fournisseurs insérés<br>";
 
@@ -129,16 +129,16 @@ $produits = [
 
 $produit_ids = [];
 foreach ($produits as $prod) {
-    $stmt = $conn->prepare("INSERT INTO produits (nom, id_categorie, prix_achat, prix_vente, quantite_stock, fournisseur_id) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE nom=nom");
-    $stmt->bind_param("sidddi", $prod[0], $prod[1], $prod[2], $prod[3], $prod[4], $prod[5]);
-    $stmt->execute();
-    $produit_ids[] = db_get_insert_id($conn);
+    $stmt = mysqli_prepare($conn, "INSERT INTO produits (nom, id_categorie, prix_achat, prix_vente, quantite_stock, fournisseur_id) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE nom=nom");
+    mysqli_stmt_bind_param($stmt, "sidddi", $prod[0], $prod[1], $prod[2], $prod[3], $prod[4], $prod[5]);
+    mysqli_stmt_execute($stmt);
+    $produit_ids[] = mysqli_insert_id($conn);
     if (end($produit_ids) == 0) {
-        $result = $conn->query("SELECT id FROM produits WHERE nom = '{$prod[0]}'");
-        $row = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result));
+        $result = mysqli_query($conn, "SELECT id FROM produits WHERE nom = '{$prod[0]}'");
+        $row = mysqli_fetch_assoc($result);
         $produit_ids[count($produit_ids) - 1] = $row['id'];
     }
-    $stmt->close();
+    mysqli_stmt_close($stmt);
 }
 echo "✅ Produits insérés (" . count($produit_ids) . " produits)<br>";
 
@@ -170,28 +170,28 @@ $clients = [
 
 $client_ids = [];
 foreach ($clients as $client) {
-    $stmt = $conn->prepare("INSERT INTO clients (nom, telephone, email, adresse) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE nom=nom");
-    $stmt->bind_param("ssss", $client[0], $client[1], $client[2], $client[3]);
-    $stmt->execute();
-    $client_ids[] = db_get_insert_id($conn);
+    $stmt = mysqli_prepare($conn, "INSERT INTO clients (nom, telephone, email, adresse) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE nom=nom");
+    mysqli_stmt_bind_param($stmt, "ssss", $client[0], $client[1], $client[2], $client[3]);
+    mysqli_stmt_execute($stmt);
+    $client_ids[] = mysqli_insert_id($conn);
     if (end($client_ids) == 0) {
-        $result = $conn->query("SELECT id FROM clients WHERE nom = '{$client[0]}'");
-        $row = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result));
+        $result = mysqli_query($conn, "SELECT id FROM clients WHERE nom = '{$client[0]}'");
+        $row = mysqli_fetch_assoc($result);
         $client_ids[count($client_ids) - 1] = $row['id'];
     }
-    $stmt->close();
+    mysqli_stmt_close($stmt);
 }
 echo "✅ Clients insérés (" . count($client_ids) . " clients)<br>";
 
 // =====================================================
 // Vérifier qu'un vendeur existe (id_utilisateur = 2)
 // =====================================================
-$result = $conn->query("SELECT id FROM utilisateurs WHERE id = 2");
-if ((is_object($result) && method_exists($result, 'num_rows') ? $result->num_rows() : mysqli_num_rows($result)) == 0) {
+$result = mysqli_query($conn, "SELECT id FROM utilisateurs WHERE id = 2");
+if (mysqli_num_rows($result) == 0) {
     // Créer un vendeur par défaut
-    $stmt = $conn->prepare("INSERT INTO utilisateurs (nom, email, mot_de_passe, role) VALUES ('Vendeur 1', 'vendeur1@epicerie.com', MD5('vendeur123'), 'vendeur')");
-    $stmt->execute();
-    $stmt->close();
+    $stmt = mysqli_prepare($conn, "INSERT INTO utilisateurs (nom, email, mot_de_passe, role) VALUES ('Vendeur 1', 'vendeur1@epicerie.com', MD5('vendeur123'), 'vendeur')");
+    mysqli_stmt_execute($stmt);
+    mysqli_stmt_close($stmt);
 }
 $id_vendeur = 2;
 
@@ -218,21 +218,21 @@ $achats = [
 
 foreach ($achats as $achat) {
     $date_achat = date('Y-m-d H:i:s', strtotime("-{$achat[1]} days"));
-    $stmt = $conn->prepare("INSERT INTO achats (id_fournisseur, date_achat, montant_total) VALUES (?, ?, ?)");
-    $stmt->bind_param("isd", $achat[0], $date_achat, $achat[2]);
-    $stmt->execute();
-    $id_achat = db_get_insert_id($conn);
-    $stmt->close();
+    $stmt = mysqli_prepare($conn, "INSERT INTO achats (id_fournisseur, date_achat, montant_total) VALUES (?, ?, ?)");
+    mysqli_stmt_bind_param($stmt, "isd", $achat[0], $date_achat, $achat[2]);
+    mysqli_stmt_execute($stmt);
+    $id_achat = mysqli_insert_id($conn);
+    mysqli_stmt_close($stmt);
     
     foreach ($achat[3] as $detail) {
         $id_prod = $produit_ids[$detail[0] - 1];
-        $stmt = $conn->prepare("INSERT INTO details_achat (id_achat, id_produit, quantite, prix_achat) VALUES (?, ?, ?, ?)");
-        $stmt->bind_param("iiid", $id_achat, $id_prod, $detail[1], $detail[2]);
-        $stmt->execute();
-        $stmt->close();
+        $stmt = mysqli_prepare($conn, "INSERT INTO details_achat (id_achat, id_produit, quantite, prix_achat) VALUES (?, ?, ?, ?)");
+        mysqli_stmt_bind_param($stmt, "iiid", $id_achat, $id_prod, $detail[1], $detail[2]);
+        mysqli_stmt_execute($stmt);
+        mysqli_stmt_close($stmt);
         
         // Mettre à jour le stock
-        $conn->query("UPDATE produits SET quantite_stock = quantite_stock + {$detail[1]}, prix_achat = {$detail[2]} WHERE id = $id_prod");
+        mysqli_query($conn, "UPDATE produits SET quantite_stock = quantite_stock + {$detail[1]}, prix_achat = {$detail[2]} WHERE id = $id_prod");
     }
 }
 echo "✅ Achats insérés (15 achats)<br>";
@@ -272,27 +272,27 @@ foreach ($ventes as $vente) {
     $date_vente = date('Y-m-d H:i:s', strtotime("-{$vente[1]} days"));
     $id_client = $client_ids[$vente[0] - 1];
     
-    $stmt = $conn->prepare("INSERT INTO ventes (id_client, id_utilisateur, date_vente, total) VALUES (?, ?, ?, ?)");
-    $stmt->bind_param("iisd", $id_client, $id_vendeur, $date_vente, $vente[2]);
-    $stmt->execute();
-    $id_vente = db_get_insert_id($conn);
-    $stmt->close();
+    $stmt = mysqli_prepare($conn, "INSERT INTO ventes (id_client, id_utilisateur, date_vente, total) VALUES (?, ?, ?, ?)");
+    mysqli_stmt_bind_param($stmt, "iisd", $id_client, $id_vendeur, $date_vente, $vente[2]);
+    mysqli_stmt_execute($stmt);
+    $id_vente = mysqli_insert_id($conn);
+    mysqli_stmt_close($stmt);
     
     foreach ($vente[3] as $detail) {
         $id_prod = $produit_ids[$detail[0] - 1];
-        $stmt = $conn->prepare("INSERT INTO details_vente (id_vente, id_produit, quantite, prix_unitaire) VALUES (?, ?, ?, ?)");
-        $stmt->bind_param("iiid", $id_vente, $id_prod, $detail[1], $detail[2]);
-        $stmt->execute();
-        $stmt->close();
+        $stmt = mysqli_prepare($conn, "INSERT INTO details_vente (id_vente, id_produit, quantite, prix_unitaire) VALUES (?, ?, ?, ?)");
+        mysqli_stmt_bind_param($stmt, "iiid", $id_vente, $id_prod, $detail[1], $detail[2]);
+        mysqli_stmt_execute($stmt);
+        mysqli_stmt_close($stmt);
         
         // Mettre à jour le stock
-        $conn->query("UPDATE produits SET quantite_stock = quantite_stock - {$detail[1]} WHERE id = $id_prod");
+        mysqli_query($conn, "UPDATE produits SET quantite_stock = quantite_stock - {$detail[1]} WHERE id = $id_prod");
     }
 }
 echo "✅ Ventes insérées (25 ventes)<br>";
 
 // Réactiver les vérifications de clés étrangères
-$conn->query("SET FOREIGN_KEY_CHECKS = 1");
+mysqli_query($conn, "SET FOREIGN_KEY_CHECKS = 1");
 
 echo "<h3 style='color: green;'>✅ Installation terminée avec succès !</h3>";
 echo "<p><strong>Résumé :</strong></p>";

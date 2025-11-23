@@ -15,8 +15,8 @@ $id_utilisateur = $_SESSION['id_utilisateur'];
 $message = "";
 
 // Vérifier si la table existe, sinon la créer
-$table_exists = $conn->query("SHOW TABLES LIKE 'demandes_acces'");
-if ((is_object($table_exists) && method_exists($table_exists, 'num_rows') ? $table_exists->num_rows() : mysqli_num_rows($table_exists)) == 0) {
+$table_exists = mysqli_query($conn, "SHOW TABLES LIKE 'demandes_acces'");
+if (mysqli_num_rows($table_exists) == 0) {
     // Créer la table si elle n'existe pas
     $create_table = "CREATE TABLE IF NOT EXISTS demandes_acces (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -33,7 +33,7 @@ if ((is_object($table_exists) && method_exists($table_exists, 'num_rows') ? $tab
         FOREIGN KEY (id_utilisateur) REFERENCES utilisateurs(id) ON DELETE CASCADE,
         FOREIGN KEY (id_admin_approbateur) REFERENCES utilisateurs(id) ON DELETE SET NULL
     )";
-    $conn->query($create_table);
+    mysqli_query($conn, $create_table);
 }
 
 // Les vendeurs et trésoriers peuvent faire des demandes
@@ -56,15 +56,15 @@ if ($peut_demander && isset($_POST['creer_demande'])) {
     if (empty($raison)) {
         $message = "⚠️ Veuillez indiquer une raison pour votre demande.";
     } else {
-        $stmt = $conn->prepare("INSERT INTO demandes_acces (id_utilisateur, type_demande, role_demande, permission_demande, raison) VALUES (?, ?, ?, ?, ?)");
-        $stmt->bind_param("issss", $id_utilisateur, $type_demande, $role_demande, $permission_demande, $raison);
+        $stmt = mysqli_prepare($conn, "INSERT INTO demandes_acces (id_utilisateur, type_demande, role_demande, permission_demande, raison) VALUES (?, ?, ?, ?, ?)");
+        mysqli_stmt_bind_param($stmt, "issss", $id_utilisateur, $type_demande, $role_demande, $permission_demande, $raison);
         
-        if ($stmt->execute()) {
+        if (mysqli_stmt_execute($stmt)) {
             $message = "✅ Votre demande a été envoyée avec succès. Un administrateur va l'examiner.";
         } else {
-            $message = "❌ Erreur lors de l'envoi de la demande : " . (isset($GLOBALS['is_postgresql']) && is_object($conn) && get_class($conn) === 'PostgreSQLConnection' ? $conn->error() : mysqli_error($conn));
+            $message = "❌ Erreur lors de l'envoi de la demande : " . mysqli_error($conn);
         }
-        $stmt->close();
+        mysqli_stmt_close($stmt);
     }
 }
 
@@ -75,12 +75,12 @@ if ($peut_approuver && isset($_POST['traiter_demande'])) {
     $commentaire = trim($_POST['commentaire'] ?? '');
 
     // Récupérer la demande
-    $stmt = $conn->prepare("SELECT * FROM demandes_acces WHERE id = ? AND statut = 'en_attente'");
-    $stmt->bind_param("i", $id_demande);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $demande = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result));
-    $stmt->close();
+    $stmt = mysqli_prepare($conn, "SELECT * FROM demandes_acces WHERE id = ? AND statut = 'en_attente'");
+    mysqli_stmt_bind_param($stmt, "i", $id_demande);
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
+    $demande = mysqli_fetch_assoc($result);
+    mysqli_stmt_close($stmt);
 
     if ($demande) {
         if ($action === 'approuver') {
@@ -94,17 +94,17 @@ if ($peut_approuver && isset($_POST['traiter_demande'])) {
                 // Vérifier que ce n'est pas le dernier admin
                 if ($nouveau_role !== 'admin') {
                     // Récupérer l'ancien rôle pour l'historique
-                    $stmt_old = $conn->prepare("SELECT nom, role FROM utilisateurs WHERE id = ?");
-                    $stmt_old->bind_param("i", $demande['id_utilisateur']);
-                    $stmt_old->execute();
-                    $result_old = $stmt_old->get_result();
-                    $ancien = (is_object($result_old) && method_exists($result_old, 'fetch_assoc') ? $result_old->fetch_assoc() : mysqli_fetch_assoc($result_old));
-                    $stmt_old->close();
+                    $stmt_old = mysqli_prepare($conn, "SELECT nom, role FROM utilisateurs WHERE id = ?");
+                    mysqli_stmt_bind_param($stmt_old, "i", $demande['id_utilisateur']);
+                    mysqli_stmt_execute($stmt_old);
+                    $result_old = mysqli_stmt_get_result($stmt_old);
+                    $ancien = mysqli_fetch_assoc($result_old);
+                    mysqli_stmt_close($stmt_old);
                     
-                    $stmt_update = $conn->prepare("UPDATE utilisateurs SET role = ? WHERE id = ?");
-                    $stmt_update->bind_param("si", $nouveau_role, $demande['id_utilisateur']);
+                    $stmt_update = mysqli_prepare($conn, "UPDATE utilisateurs SET role = ? WHERE id = ?");
+                    mysqli_stmt_bind_param($stmt_update, "si", $nouveau_role, $demande['id_utilisateur']);
                     
-                    if ($stmt_update->execute()) {
+                    if (mysqli_stmt_execute($stmt_update)) {
                         enregistrer_historique($conn, $id_utilisateur, 'modification', 'utilisateurs', $demande['id_utilisateur'], 
                             "Rôle changé via demande d'accès approuvée: {$ancien['nom']} ({$ancien['role']} → {$nouveau_role})", 
                             $ancien, ['role' => $nouveau_role]);
@@ -112,7 +112,7 @@ if ($peut_approuver && isset($_POST['traiter_demande'])) {
                     } else {
                         $message = "❌ Erreur lors de la mise à jour du rôle.";
                     }
-                    $stmt_update->close();
+                    mysqli_stmt_close($stmt_update);
                 } else {
                     $message = "⚠️ Impossible d'attribuer le rôle admin via une demande.";
                 }
@@ -156,10 +156,10 @@ if ($peut_approuver && isset($_POST['traiter_demande'])) {
         }
 
         // Mettre à jour le statut de la demande
-        $stmt_update = $conn->prepare("UPDATE demandes_acces SET statut = ?, id_admin_approbateur = ?, date_traitement = NOW(), commentaire_admin = ? WHERE id = ?");
-        $stmt_update->bind_param("siss", $nouveau_statut, $id_utilisateur, $commentaire, $id_demande);
-        $stmt_update->execute();
-        $stmt_update->close();
+        $stmt_update = mysqli_prepare($conn, "UPDATE demandes_acces SET statut = ?, id_admin_approbateur = ?, date_traitement = NOW(), commentaire_admin = ? WHERE id = ?");
+        mysqli_stmt_bind_param($stmt_update, "siss", $nouveau_statut, $id_utilisateur, $commentaire, $id_demande);
+        mysqli_stmt_execute($stmt_update);
+        mysqli_stmt_close($stmt_update);
     }
 }
 
@@ -171,14 +171,14 @@ if ($peut_demander) {
               LEFT JOIN utilisateurs u ON d.id_admin_approbateur = u.id 
               WHERE d.id_utilisateur = ? 
               ORDER BY d.date_demande DESC";
-    $stmt = $conn->prepare($query);
-    $stmt->bind_param("i", $id_utilisateur);
-    $stmt->execute();
-    $mes_demandes = $stmt->get_result();
-    $stmt->close();
+    $stmt = mysqli_prepare($conn, $query);
+    mysqli_stmt_bind_param($stmt, "i", $id_utilisateur);
+    mysqli_stmt_execute($stmt);
+    $mes_demandes = mysqli_stmt_get_result($stmt);
+    mysqli_stmt_close($stmt);
 } else {
     // Admin : voir toutes les demandes en attente
-    $demandes_en_attente = $conn->query("
+    $demandes_en_attente = mysqli_query($conn, "
         SELECT d.*, u.nom as demandeur_nom, u.email as demandeur_email, u.role as demandeur_role
         FROM demandes_acces d
         JOIN utilisateurs u ON d.id_utilisateur = u.id
@@ -187,7 +187,7 @@ if ($peut_demander) {
     ");
     
     // Toutes les demandes pour historique
-    $toutes_demandes = $conn->query("
+    $toutes_demandes = mysqli_query($conn, "
         SELECT d.*, u.nom as demandeur_nom, u.email as demandeur_email, u.role as demandeur_role, a.nom as admin_nom
         FROM demandes_acces d
         JOIN utilisateurs u ON d.id_utilisateur = u.id
@@ -306,8 +306,8 @@ if ($peut_demander) {
                     </tr>
                 </thead>
                 <tbody>
-                    <?php if ($mes_demandes && (is_object($mes_demandes) && method_exists($mes_demandes, 'num_rows') ? $mes_demandes->num_rows() : mysqli_num_rows($mes_demandes)) > 0): ?>
-                        <?php while ($d = (is_object($mes_demandes) && method_exists($mes_demandes, 'fetch_assoc') ? $mes_demandes->fetch_assoc() : mysqli_fetch_assoc($mes_demandes))): ?>
+                    <?php if ($mes_demandes && mysqli_num_rows($mes_demandes) > 0): ?>
+                        <?php while ($d = mysqli_fetch_assoc($mes_demandes)): ?>
                         <tr>
                             <td><?= date('d/m/Y H:i', strtotime($d['date_demande'])) ?></td>
                             <td><?= $d['type_demande'] === 'role' ? 'Changement de rôle' : 'Permission spécifique' ?></td>
@@ -373,14 +373,14 @@ if ($peut_demander) {
                 </div>
             </div>
             
-            <?php if ($demandes_en_attente && (is_object($demandes_en_attente) && method_exists($demandes_en_attente, 'num_rows') ? $demandes_en_attente->num_rows() : mysqli_num_rows($demandes_en_attente)) > 0): ?>
+            <?php if ($demandes_en_attente && mysqli_num_rows($demandes_en_attente) > 0): ?>
                 <div style="background: #f8f9fa; padding: 15px; border-radius: 10px; margin-bottom: 20px; border-left: 4px solid #dc3545;">
                     <strong style="color: #dc3545; font-size: 1.1em;">
-                        📊 <?= (is_object($demandes_en_attente) && method_exists($demandes_en_attente, 'num_rows') ? $demandes_en_attente->num_rows() : mysqli_num_rows($demandes_en_attente)) ?> demande<?= (is_object($demandes_en_attente) && method_exists($demandes_en_attente, 'num_rows') ? $demandes_en_attente->num_rows() : mysqli_num_rows($demandes_en_attente)) > 1 ? 's' : '' ?> nécessite<?= (is_object($demandes_en_attente) && method_exists($demandes_en_attente, 'num_rows') ? $demandes_en_attente->num_rows() : mysqli_num_rows($demandes_en_attente)) > 1 ? 'nt' : '' ?> votre attention
+                        📊 <?= mysqli_num_rows($demandes_en_attente) ?> demande<?= mysqli_num_rows($demandes_en_attente) > 1 ? 's' : '' ?> nécessite<?= mysqli_num_rows($demandes_en_attente) > 1 ? 'nt' : '' ?> votre attention
                     </strong>
                 </div>
                 <div style="display: grid; gap: 20px;">
-                    <?php while ($d = (is_object($demandes_en_attente) && method_exists($demandes_en_attente, 'fetch_assoc') ? $demandes_en_attente->fetch_assoc() : mysqli_fetch_assoc($demandes_en_attente))): ?>
+                    <?php while ($d = mysqli_fetch_assoc($demandes_en_attente)): ?>
                     <div style="background: white; border: 2px solid #e0e0e0; border-radius: 15px; padding: 25px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); transition: 0.3s;" onmouseover="this.style.borderColor='#fa8c0f'; this.style.transform='translateY(-3px)'" onmouseout="this.style.borderColor='#e0e0e0'; this.style.transform='translateY(0)'">
                         <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 20px;">
                             <div>
@@ -534,8 +534,8 @@ if ($peut_demander) {
                     </tr>
                 </thead>
                 <tbody>
-                    <?php if ($toutes_demandes && (is_object($toutes_demandes) && method_exists($toutes_demandes, 'num_rows') ? $toutes_demandes->num_rows() : mysqli_num_rows($toutes_demandes)) > 0): ?>
-                        <?php while ($d = (is_object($toutes_demandes) && method_exists($toutes_demandes, 'fetch_assoc') ? $toutes_demandes->fetch_assoc() : mysqli_fetch_assoc($toutes_demandes))): ?>
+                    <?php if ($toutes_demandes && mysqli_num_rows($toutes_demandes) > 0): ?>
+                        <?php while ($d = mysqli_fetch_assoc($toutes_demandes)): ?>
                         <tr>
                             <td><?= date('d/m/Y H:i', strtotime($d['date_demande'])) ?></td>
                             <td>

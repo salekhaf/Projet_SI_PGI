@@ -29,16 +29,16 @@ if ($peut_modifier && isset($_POST['ajouter'])) {
     $adresse = trim($_POST['adresse']);
 
     if ($nom !== "") {
-        $stmt = $conn->prepare("INSERT INTO fournisseurs (nom, telephone, email, adresse) VALUES (?, ?, ?, ?)");
-        $stmt->bind_param("ssss", $nom, $telephone, $email, $adresse);
-        if ($stmt->execute()) {
-            $id_fournisseur = db_get_insert_id($conn);
+        $stmt = mysqli_prepare($conn, "INSERT INTO fournisseurs (nom, telephone, email, adresse) VALUES (?, ?, ?, ?)");
+        mysqli_stmt_bind_param($stmt, "ssss", $nom, $telephone, $email, $adresse);
+        if (mysqli_stmt_execute($stmt)) {
+            $id_fournisseur = mysqli_insert_id($conn);
             enregistrer_historique($conn, $id_utilisateur, 'ajout', 'fournisseurs', $id_fournisseur, "Ajout du fournisseur: $nom");
             $message = "✅ Fournisseur ajouté avec succès.";
         } else {
-            $message = "❌ Erreur lors de l'ajout : " . (isset($GLOBALS['is_postgresql']) && is_object($conn) && get_class($conn) === 'PostgreSQLConnection' ? $conn->error() : mysqli_error($conn));
+            $message = "❌ Erreur lors de l'ajout : " . mysqli_error($conn);
         }
-        $stmt->close();
+        mysqli_stmt_close($stmt);
     } else {
         $message = "⚠️ Le nom du fournisseur est obligatoire.";
     }
@@ -52,39 +52,39 @@ if ($peut_modifier && isset($_POST['modifier'])) {
     $email = trim($_POST['email']);
     $adresse = trim($_POST['adresse']);
     
-    $stmt = $conn->prepare("SELECT * FROM fournisseurs WHERE id = ?");
-    $stmt->bind_param("i", $id);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $ancien = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result));
-    $stmt->close();
+    $stmt = mysqli_prepare($conn, "SELECT * FROM fournisseurs WHERE id = ?");
+    mysqli_stmt_bind_param($stmt, "i", $id);
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
+    $ancien = mysqli_fetch_assoc($result);
+    mysqli_stmt_close($stmt);
     
-    $stmt = $conn->prepare("UPDATE fournisseurs SET nom = ?, telephone = ?, email = ?, adresse = ? WHERE id = ?");
-    $stmt->bind_param("ssssi", $nom, $telephone, $email, $adresse, $id);
-    if ($stmt->execute()) {
+    $stmt = mysqli_prepare($conn, "UPDATE fournisseurs SET nom = ?, telephone = ?, email = ?, adresse = ? WHERE id = ?");
+    mysqli_stmt_bind_param($stmt, "ssssi", $nom, $telephone, $email, $adresse, $id);
+    if (mysqli_stmt_execute($stmt)) {
         enregistrer_historique($conn, $id_utilisateur, 'modification', 'fournisseurs', $id, "Modification du fournisseur: $nom", $ancien, ['nom' => $nom, 'telephone' => $telephone, 'email' => $email]);
         $message = "✅ Fournisseur modifié avec succès.";
     } else {
-        $message = "❌ Erreur : " . (isset($GLOBALS['is_postgresql']) && is_object($conn) && get_class($conn) === 'PostgreSQLConnection' ? $conn->error() : mysqli_error($conn));
+        $message = "❌ Erreur : " . mysqli_error($conn);
     }
-    $stmt->close();
+    mysqli_stmt_close($stmt);
 }
 
 // --- SUPPRESSION D'UN FOURNISSEUR ---
 if ($peut_modifier && isset($_GET['supprimer'])) {
     $id = intval($_GET['supprimer']);
     
-    $stmt = $conn->prepare("SELECT * FROM fournisseurs WHERE id = ?");
-    $stmt->bind_param("i", $id);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $fournisseur = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result));
-    $stmt->close();
+    $stmt = mysqli_prepare($conn, "SELECT * FROM fournisseurs WHERE id = ?");
+    mysqli_stmt_bind_param($stmt, "i", $id);
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
+    $fournisseur = mysqli_fetch_assoc($result);
+    mysqli_stmt_close($stmt);
     
-    $stmt = $conn->prepare("DELETE FROM fournisseurs WHERE id = ?");
-    $stmt->bind_param("i", $id);
-    $stmt->execute();
-    $stmt->close();
+    $stmt = mysqli_prepare($conn, "DELETE FROM fournisseurs WHERE id = ?");
+    mysqli_stmt_bind_param($stmt, "i", $id);
+    mysqli_stmt_execute($stmt);
+    mysqli_stmt_close($stmt);
     
     enregistrer_historique($conn, $id_utilisateur, 'suppression', 'fournisseurs', $id, "Suppression du fournisseur: " . $fournisseur['nom'], $fournisseur, null);
     header("Location: fournisseurs.php");
@@ -102,9 +102,9 @@ if (isset($_GET['export']) && $_GET['export'] == 'csv') {
     fputcsv($output, ['ID', 'Nom', 'Téléphone', 'Email', 'Adresse'], ';');
     
     $query = "SELECT * FROM fournisseurs ORDER BY nom ASC";
-    $result = $conn->query($query);
+    $result = mysqli_query($conn, $query);
     
-    while ($row = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result))) {
+    while ($row = mysqli_fetch_assoc($result)) {
         fputcsv($output, [
             $row['id'],
             $row['nom'],
@@ -133,15 +133,15 @@ if (!empty($recherche)) {
 // Compte total
 $count_query = "SELECT COUNT(*) as total FROM fournisseurs $where_clause";
 if (!empty($params)) {
-    $stmt = $conn->prepare($count_query);
-    $stmt->bind_param($types, ...$params);
-    $stmt->execute();
-    $count_result = $stmt->get_result();
-    $total_rows = (is_object($count_result) && method_exists($count_result, 'fetch_assoc') ? $count_result->fetch_assoc() : mysqli_fetch_assoc($count_result))['total'];
-    $stmt->close();
+    $stmt = mysqli_prepare($conn, $count_query);
+    mysqli_stmt_bind_param($stmt, $types, ...$params);
+    mysqli_stmt_execute($stmt);
+    $count_result = mysqli_stmt_get_result($stmt);
+    $total_rows = mysqli_fetch_assoc($count_result)['total'];
+    mysqli_stmt_close($stmt);
 } else {
-    $count_result = $conn->query($count_query);
-    $total_rows = (is_object($count_result) && method_exists($count_result, 'fetch_assoc') ? $count_result->fetch_assoc() : mysqli_fetch_assoc($count_result))['total'];
+    $count_result = mysqli_query($conn, $count_query);
+    $total_rows = mysqli_fetch_assoc($count_result)['total'];
 }
 $total_pages = ceil($total_rows / $per_page);
 
@@ -157,21 +157,21 @@ $params[] = $per_page;
 $params[] = $offset;
 $types .= "ii";
 
-$stmt = $conn->prepare($query);
-$stmt->bind_param($types, ...$params);
-$stmt->execute();
-$result = $stmt->get_result();
+$stmt = mysqli_prepare($conn, $query);
+mysqli_stmt_bind_param($stmt, $types, ...$params);
+mysqli_stmt_execute($stmt);
+$result = mysqli_stmt_get_result($stmt);
 
 // Fournisseur à modifier
 $fournisseur_edit = null;
 if (isset($_GET['edit']) && $peut_modifier) {
     $id_edit = intval($_GET['edit']);
-    $stmt = $conn->prepare("SELECT * FROM fournisseurs WHERE id = ?");
-    $stmt->bind_param("i", $id_edit);
-    $stmt->execute();
-    $result_edit = $stmt->get_result();
-    $fournisseur_edit = (is_object($result_edit) && method_exists($result_edit, 'fetch_assoc') ? $result_edit->fetch_assoc() : mysqli_fetch_assoc($result_edit));
-    $stmt->close();
+    $stmt = mysqli_prepare($conn, "SELECT * FROM fournisseurs WHERE id = ?");
+    mysqli_stmt_bind_param($stmt, "i", $id_edit);
+    mysqli_stmt_execute($stmt);
+    $result_edit = mysqli_stmt_get_result($stmt);
+    $fournisseur_edit = mysqli_fetch_assoc($result_edit);
+    mysqli_stmt_close($stmt);
 }
 ?>
 <!DOCTYPE html>
@@ -278,8 +278,8 @@ if (isset($_GET['edit']) && $peut_modifier) {
             </thead>
             <tbody>
                 <?php 
-                if ((is_object($result) && method_exists($result, 'num_rows') ? $result->num_rows() : mysqli_num_rows($result)) > 0):
-                    while ($row = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result))): 
+                if (mysqli_num_rows($result) > 0):
+                    while ($row = mysqli_fetch_assoc($result)): 
                 ?>
         <tr>
             <td><?= $row['id'] ?></td>

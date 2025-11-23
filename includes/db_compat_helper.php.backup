@@ -18,8 +18,8 @@ function table_exists($conn, $table_name) {
         }
     } else {
         // MySQL
-        $check_table = $conn->query("SHOW TABLES LIKE '$table_name'");
-        return (is_object($check_table) && method_exists($check_table, 'num_rows') ? $check_table->num_rows() : mysqli_num_rows($check_table)) > 0;
+        $check_table = mysqli_query($conn, "SHOW TABLES LIKE '$table_name'");
+        return mysqli_num_rows($check_table) > 0;
     }
 }
 
@@ -37,7 +37,7 @@ function db_insert_id($conn) {
         }
     } else {
         // MySQL
-        return db_get_insert_id($conn);
+        return mysqli_insert_id($conn);
     }
 }
 
@@ -61,26 +61,6 @@ function convert_mysql_to_postgresql($sql) {
     $sql = preg_replace('/\bYEAR\(([^)]+)\)/i', 'EXTRACT(YEAR FROM $1)', $sql);
     
     return $sql;
-}
-
-/**
- * Helper pour mysqli_fetch_assoc compatible PostgreSQL
- */
-function db_fetch_assoc($result) {
-    if (is_object($result) && method_exists($result, 'fetch_assoc')) {
-        return $result->fetch_assoc();
-    }
-    return mysqli_fetch_assoc($result);
-}
-
-/**
- * Helper pour mysqli_num_rows compatible PostgreSQL
- */
-function db_num_rows($result) {
-    if (is_object($result) && method_exists($result, 'num_rows')) {
-        return $result->num_rows();
-    }
-    return mysqli_num_rows($result);
 }
 ?>
 

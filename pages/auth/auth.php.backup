@@ -19,26 +19,26 @@ if (isset($_POST['register'])) {
     } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $message = "⚠️ Email invalide.";
     } else {
-        $stmt = $conn->prepare("SELECT id FROM utilisateurs WHERE email = ?");
-        $stmt->bind_param("s", $email);
-        $stmt->execute();
+        $stmt = mysqli_prepare($conn, "SELECT id FROM utilisateurs WHERE email = ?");
+        mysqli_stmt_bind_param($stmt, "s", $email);
+        mysqli_stmt_execute($stmt);
         mysqli_stmt_store_result($stmt);
         $exists = mysqli_stmt_num_rows($stmt) > 0;
-        $stmt->close();
+        mysqli_stmt_close($stmt);
 
         if ($exists) {
             $message = "⚠️ Cet email est déjà utilisé.";
         } else {
             $motdepasse_hache = password_hash($motdepasse, PASSWORD_DEFAULT);
             $role = 'vendeur';
-            $stmt = $conn->prepare("INSERT INTO utilisateurs (nom, email, mot_de_passe, role) VALUES (?, ?, ?, ?)");
-            $stmt->bind_param("ssss", $nom, $email, $motdepasse_hache, $role);
-            if ($stmt->execute()) {
+            $stmt = mysqli_prepare($conn, "INSERT INTO utilisateurs (nom, email, mot_de_passe, role) VALUES (?, ?, ?, ?)");
+            mysqli_stmt_bind_param($stmt, "ssss", $nom, $email, $motdepasse_hache, $role);
+            if (mysqli_stmt_execute($stmt)) {
                 $message = "✅ Inscription réussie ! Vous pouvez vous connecter.";
             } else {
-                $message = "❌ Erreur lors de l'inscription : " . (isset($GLOBALS['is_postgresql']) && is_object($conn) && get_class($conn) === 'PostgreSQLConnection' ? $conn->error() : mysqli_error($conn));
+                $message = "❌ Erreur lors de l'inscription : " . mysqli_error($conn);
             }
-            $stmt->close();
+            mysqli_stmt_close($stmt);
         }
     }
 }
@@ -51,13 +51,13 @@ if (isset($_POST['login'])) {
     if ($email === '' || $motdepasse === '') {
         $message = "⚠️ Veuillez renseigner tous les champs.";
     } else {
-        $stmt = $conn->prepare("SELECT id, nom, mot_de_passe, role FROM utilisateurs WHERE email = ?");
-        $stmt->bind_param("s", $email);
-        $stmt->execute();
-        $result = $stmt->get_result();
+        $stmt = mysqli_prepare($conn, "SELECT id, nom, mot_de_passe, role FROM utilisateurs WHERE email = ?");
+        mysqli_stmt_bind_param($stmt, "s", $email);
+        mysqli_stmt_execute($stmt);
+        $result = mysqli_stmt_get_result($stmt);
 
-        if ($result && (is_object($result) && method_exists($result, 'num_rows') ? $result->num_rows() : mysqli_num_rows($result)) === 1) {
-            $user = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result));
+        if ($result && mysqli_num_rows($result) === 1) {
+            $user = mysqli_fetch_assoc($result);
             if (password_verify($motdepasse, $user['mot_de_passe'])) {
                 $_SESSION['id_utilisateur'] = $user['id'];
                 $_SESSION['nom'] = $user['nom'];
@@ -70,7 +70,7 @@ if (isset($_POST['login'])) {
         } else {
             $message = "⚠️ Aucun compte trouvé avec cet email.";
         }
-        $stmt->close();
+        mysqli_stmt_close($stmt);
     }
 }
 ?>

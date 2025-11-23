@@ -16,8 +16,8 @@ $id_utilisateur = $_SESSION['id_utilisateur'];
 $message = "";
 
 // Créer la table depenses_diverses si elle n'existe pas
-$table_exists = $conn->query("SHOW TABLES LIKE 'depenses_diverses'");
-if ((is_object($table_exists) && method_exists($table_exists, 'num_rows') ? $table_exists->num_rows() : mysqli_num_rows($table_exists)) == 0) {
+$table_exists = mysqli_query($conn, "SHOW TABLES LIKE 'depenses_diverses'");
+if (mysqli_num_rows($table_exists) == 0) {
     $create_table = "CREATE TABLE IF NOT EXISTS depenses_diverses (
         id INT AUTO_INCREMENT PRIMARY KEY,
         type_operation ENUM('depense', 'entree') NOT NULL,
@@ -28,7 +28,7 @@ if ((is_object($table_exists) && method_exists($table_exists, 'num_rows') ? $tab
         notes TEXT NULL,
         FOREIGN KEY (id_utilisateur) REFERENCES utilisateurs(id) ON DELETE CASCADE
     )";
-    $conn->query($create_table);
+    mysqli_query($conn, $create_table);
 }
 
 // === GESTION DES ACCÈS ===
@@ -44,18 +44,18 @@ if ($est_vendeur || !$est_admin) {
 // Si utilisateur sans accès, vérifier s'il a déjà une demande en attente
 $demande_en_attente = false;
 if (!$est_admin && !$acces_autorise) {
-    $check_attente = $conn->prepare("
+    $check_attente = mysqli_prepare($conn, "
         SELECT id FROM demandes_acces 
         WHERE id_utilisateur = ? 
         AND (permission_demande = 'acces_tresorerie' OR permission_demande = 'acces_general')
         AND statut = 'en_attente'
         LIMIT 1
     ");
-    $check_attente->bind_param("i", $id_utilisateur);
-    $check_attente->execute();
-    $result_attente = $check_attente->get_result();
-    $demande_en_attente = ((is_object($result_attente) && method_exists($result_attente, 'num_rows') ? $result_attente->num_rows() : mysqli_num_rows($result_attente)) > 0);
-    $check_attente->close();
+    mysqli_stmt_bind_param($check_attente, "i", $id_utilisateur);
+    mysqli_stmt_execute($check_attente);
+    $result_attente = mysqli_stmt_get_result($check_attente);
+    $demande_en_attente = (mysqli_num_rows($result_attente) > 0);
+    mysqli_stmt_close($check_attente);
 }
 
 // Créer une demande d'accès
@@ -64,15 +64,15 @@ if (!$est_admin && !$acces_autorise && !$demande_en_attente && isset($_POST['dem
     if (empty($raison)) {
         $message = "⚠️ Veuillez indiquer une raison pour votre demande.";
     } else {
-        $stmt = $conn->prepare("INSERT INTO demandes_acces (id_utilisateur, type_demande, permission_demande, raison) VALUES (?, 'permission_specifique', 'acces_tresorerie', ?)");
-        $stmt->bind_param("is", $id_utilisateur, $raison);
-        if ($stmt->execute()) {
+        $stmt = mysqli_prepare($conn, "INSERT INTO demandes_acces (id_utilisateur, type_demande, permission_demande, raison) VALUES (?, 'permission_specifique', 'acces_tresorerie', ?)");
+        mysqli_stmt_bind_param($stmt, "is", $id_utilisateur, $raison);
+        if (mysqli_stmt_execute($stmt)) {
             $message = "✅ Votre demande d'accès a été envoyée. Un administrateur va l'examiner.";
             $demande_en_attente = true;
         } else {
             $message = "❌ Erreur lors de l'envoi de la demande.";
         }
-        $stmt->close();
+        mysqli_stmt_close($stmt);
     }
 }
 
@@ -241,16 +241,16 @@ if ($est_admin && isset($_POST['ajouter_operation'])) {
     if (empty($libelle) || $montant <= 0) {
         $message = "⚠️ Veuillez remplir tous les champs correctement.";
     } else {
-        $stmt = $conn->prepare("INSERT INTO depenses_diverses (type_operation, libelle, montant, id_utilisateur, notes) VALUES (?, ?, ?, ?, ?)");
-        $stmt->bind_param("ssdis", $type_op, $libelle, $montant, $id_utilisateur, $notes);
-        if ($stmt->execute()) {
-            $id_operation = db_get_insert_id($conn);
+        $stmt = mysqli_prepare($conn, "INSERT INTO depenses_diverses (type_operation, libelle, montant, id_utilisateur, notes) VALUES (?, ?, ?, ?, ?)");
+        mysqli_stmt_bind_param($stmt, "ssdis", $type_op, $libelle, $montant, $id_utilisateur, $notes);
+        if (mysqli_stmt_execute($stmt)) {
+            $id_operation = mysqli_insert_id($conn);
             enregistrer_historique($conn, $id_utilisateur, 'INSERT', 'depenses_diverses', $id_operation, "Ajout d'une opération de trésorerie : $libelle");
             $message = "✅ Opération enregistrée avec succès.";
         } else {
             $message = "❌ Erreur lors de l'enregistrement.";
         }
-        $stmt->close();
+        mysqli_stmt_close($stmt);
     }
 }
 
@@ -263,24 +263,24 @@ if ($est_admin && isset($_POST['modifier_operation'])) {
     $notes = trim($_POST['notes'] ?? '');
     
     // Récupérer anciennes valeurs
-    $old = mysqli_fetch_assoc($conn->query("SELECT * FROM depenses_diverses WHERE id = $id_op"));
+    $old = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM depenses_diverses WHERE id = $id_op"));
     
-    $stmt = $conn->prepare("UPDATE depenses_diverses SET type_operation = ?, libelle = ?, montant = ?, notes = ? WHERE id = ?");
-    $stmt->bind_param("ssdsi", $type_op, $libelle, $montant, $notes, $id_op);
-    if ($stmt->execute()) {
+    $stmt = mysqli_prepare($conn, "UPDATE depenses_diverses SET type_operation = ?, libelle = ?, montant = ?, notes = ? WHERE id = ?");
+    mysqli_stmt_bind_param($stmt, "ssdsi", $type_op, $libelle, $montant, $notes, $id_op);
+    if (mysqli_stmt_execute($stmt)) {
         enregistrer_historique($conn, $id_utilisateur, 'UPDATE', 'depenses_diverses', $id_op, "Modification d'une opération de trésorerie", $old, ['type_operation' => $type_op, 'libelle' => $libelle, 'montant' => $montant, 'notes' => $notes]);
         $message = "✅ Opération modifiée avec succès.";
     } else {
         $message = "❌ Erreur lors de la modification.";
     }
-    $stmt->close();
+    mysqli_stmt_close($stmt);
 }
 
 // Suppression d'une dépense/entrée diverse
 if ($est_admin && isset($_GET['supprimer_operation'])) {
     $id_op = intval($_GET['supprimer_operation']);
-    $old = mysqli_fetch_assoc($conn->query("SELECT * FROM depenses_diverses WHERE id = $id_op"));
-    $conn->query("DELETE FROM depenses_diverses WHERE id = $id_op");
+    $old = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM depenses_diverses WHERE id = $id_op"));
+    mysqli_query($conn, "DELETE FROM depenses_diverses WHERE id = $id_op");
     enregistrer_historique($conn, $id_utilisateur, 'DELETE', 'depenses_diverses', $id_op, "Suppression d'une opération de trésorerie", $old);
     $message = "✅ Opération supprimée avec succès.";
     header("Location: tresorerie.php?periode=$periode");
@@ -291,41 +291,41 @@ if ($est_admin && isset($_GET['supprimer_operation'])) {
 
 // CA du jour
 $ca_jour_query = "SELECT SUM(total) as total FROM ventes WHERE DATE(date_vente) = CURDATE()";
-$ca_jour_result = $conn->query($ca_jour_query);
-$ca_jour = floatval((is_object($ca_jour_result) && method_exists($ca_jour_result, 'fetch_assoc') ? $ca_jour_result->fetch_assoc() : mysqli_fetch_assoc($ca_jour_result))['total'] ?? 0);
+$ca_jour_result = mysqli_query($conn, $ca_jour_query);
+$ca_jour = floatval(mysqli_fetch_assoc($ca_jour_result)['total'] ?? 0);
 
 // CA du mois
 $ca_mois_query = "SELECT SUM(total) as total FROM ventes WHERE MONTH(date_vente) = MONTH(CURDATE()) AND YEAR(date_vente) = YEAR(CURDATE())";
-$ca_mois_result = $conn->query($ca_mois_query);
-$ca_mois = floatval((is_object($ca_mois_result) && method_exists($ca_mois_result, 'fetch_assoc') ? $ca_mois_result->fetch_assoc() : mysqli_fetch_assoc($ca_mois_result))['total'] ?? 0);
+$ca_mois_result = mysqli_query($conn, $ca_mois_query);
+$ca_mois = floatval(mysqli_fetch_assoc($ca_mois_result)['total'] ?? 0);
 
 // CA total
 $ca_total_query = "SELECT SUM(total) as total FROM ventes";
-$ca_total_result = $conn->query($ca_total_query);
-$ca_total = floatval((is_object($ca_total_result) && method_exists($ca_total_result, 'fetch_assoc') ? $ca_total_result->fetch_assoc() : mysqli_fetch_assoc($ca_total_result))['total'] ?? 0);
+$ca_total_result = mysqli_query($conn, $ca_total_query);
+$ca_total = floatval(mysqli_fetch_assoc($ca_total_result)['total'] ?? 0);
 
 // Total achats fournisseurs
 $achats_total_query = "SELECT SUM(montant_total) as total FROM achats";
-$achats_total_result = $conn->query($achats_total_query);
-$achats_total = floatval((is_object($achats_total_result) && method_exists($achats_total_result, 'fetch_assoc') ? $achats_total_result->fetch_assoc() : mysqli_fetch_assoc($achats_total_result))['total'] ?? 0);
+$achats_total_result = mysqli_query($conn, $achats_total_query);
+$achats_total = floatval(mysqli_fetch_assoc($achats_total_result)['total'] ?? 0);
 
 // Achats de la période
 $achats_periode_query = "SELECT SUM(montant_total) as total FROM achats WHERE DATE(date_achat) BETWEEN '$date_debut' AND '$date_fin'";
-$achats_periode_result = $conn->query($achats_periode_query);
-$achats_periode = floatval((is_object($achats_periode_result) && method_exists($achats_periode_result, 'fetch_assoc') ? $achats_periode_result->fetch_assoc() : mysqli_fetch_assoc($achats_periode_result))['total'] ?? 0);
+$achats_periode_result = mysqli_query($conn, $achats_periode_query);
+$achats_periode = floatval(mysqli_fetch_assoc($achats_periode_result)['total'] ?? 0);
 
 // CA de la période
 $ca_periode_query = "SELECT SUM(total) as total FROM ventes WHERE DATE(date_vente) BETWEEN '$date_debut' AND '$date_fin'";
-$ca_periode_result = $conn->query($ca_periode_query);
-$ca_periode = floatval((is_object($ca_periode_result) && method_exists($ca_periode_result, 'fetch_assoc') ? $ca_periode_result->fetch_assoc() : mysqli_fetch_assoc($ca_periode_result))['total'] ?? 0);
+$ca_periode_result = mysqli_query($conn, $ca_periode_query);
+$ca_periode = floatval(mysqli_fetch_assoc($ca_periode_result)['total'] ?? 0);
 
 // Dépenses diverses (total)
 $depenses_diverses_query = "SELECT 
     SUM(CASE WHEN type_operation = 'depense' THEN montant ELSE 0 END) as total_depenses,
     SUM(CASE WHEN type_operation = 'entree' THEN montant ELSE 0 END) as total_entrees
     FROM depenses_diverses";
-$depenses_diverses_result = $conn->query($depenses_diverses_query);
-$depenses_diverses = (is_object($depenses_diverses_result) && method_exists($depenses_diverses_result, 'fetch_assoc') ? $depenses_diverses_result->fetch_assoc() : mysqli_fetch_assoc($depenses_diverses_result));
+$depenses_diverses_result = mysqli_query($conn, $depenses_diverses_query);
+$depenses_diverses = mysqli_fetch_assoc($depenses_diverses_result);
 $total_depenses_diverses = floatval($depenses_diverses['total_depenses'] ?? 0);
 $total_entrees_diverses = floatval($depenses_diverses['total_entrees'] ?? 0);
 
@@ -335,8 +335,8 @@ $depenses_periode_query = "SELECT
     SUM(CASE WHEN type_operation = 'entree' THEN montant ELSE 0 END) as total_entrees
     FROM depenses_diverses
     WHERE DATE(date_operation) BETWEEN '$date_debut' AND '$date_fin'";
-$depenses_periode_result = $conn->query($depenses_periode_query);
-$depenses_periode = (is_object($depenses_periode_result) && method_exists($depenses_periode_result, 'fetch_assoc') ? $depenses_periode_result->fetch_assoc() : mysqli_fetch_assoc($depenses_periode_result));
+$depenses_periode_result = mysqli_query($conn, $depenses_periode_query);
+$depenses_periode = mysqli_fetch_assoc($depenses_periode_result);
 $total_depenses_periode = floatval($depenses_periode['total_depenses'] ?? 0);
 $total_entrees_periode = floatval($depenses_periode['total_entrees'] ?? 0);
 
@@ -351,7 +351,7 @@ $benefice_estime_periode = $marge_brute_periode - $total_depenses_periode + $tot
 // === DONNÉES POUR GRAPHIQUES ===
 
 // Évolution des ventes (7 derniers jours)
-$ventes_7jours = $conn->query("
+$ventes_7jours = mysqli_query($conn, "
     SELECT DATE(date_vente) as date, SUM(total) as total
     FROM ventes
     WHERE date_vente >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
@@ -361,13 +361,13 @@ $ventes_7jours = $conn->query("
 
 $labels_ventes = [];
 $data_ventes = [];
-while ($row = (is_object($ventes_7jours) && method_exists($ventes_7jours, 'fetch_assoc') ? $ventes_7jours->fetch_assoc() : mysqli_fetch_assoc($ventes_7jours))) {
+while ($row = mysqli_fetch_assoc($ventes_7jours)) {
     $labels_ventes[] = date('d/m', strtotime($row['date']));
     $data_ventes[] = floatval($row['total']);
 }
 
 // Évolution des achats (7 derniers jours)
-$achats_7jours = $conn->query("
+$achats_7jours = mysqli_query($conn, "
     SELECT DATE(date_achat) as date, SUM(montant_total) as total
     FROM achats
     WHERE date_achat >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
@@ -378,7 +378,7 @@ $achats_7jours = $conn->query("
 $labels_achats = [];
 $data_achats = [];
 $dates_achats = [];
-while ($row = (is_object($achats_7jours) && method_exists($achats_7jours, 'fetch_assoc') ? $achats_7jours->fetch_assoc() : mysqli_fetch_assoc($achats_7jours))) {
+while ($row = mysqli_fetch_assoc($achats_7jours)) {
     $dates_achats[] = date('d/m', strtotime($row['date']));
     $data_achats[] = floatval($row['total']);
 }
@@ -399,7 +399,7 @@ foreach ($all_dates as $date) {
 }
 
 // Bénéfice net par période (30 derniers jours)
-$benefices_30jours = $conn->query("
+$benefices_30jours = mysqli_query($conn, "
     SELECT 
         DATE(v.date_vente) as date,
         COALESCE(SUM(v.total), 0) as ventes,
@@ -422,7 +422,7 @@ $benefices_30jours = $conn->query("
 
 $labels_benefices = [];
 $data_benefices = [];
-while ($row = (is_object($benefices_30jours) && method_exists($benefices_30jours, 'fetch_assoc') ? $benefices_30jours->fetch_assoc() : mysqli_fetch_assoc($benefices_30jours))) {
+while ($row = mysqli_fetch_assoc($benefices_30jours)) {
     $labels_benefices[] = date('d/m', strtotime($row['date']));
     $benefice_jour = floatval($row['ventes']) - floatval($row['achats']) - floatval($row['depenses']) + floatval($row['entrees']);
     $data_benefices[] = $benefice_jour;
@@ -466,13 +466,13 @@ $operations_query = "
     LIMIT 100
 ";
 
-$operations = $conn->query($operations_query);
+$operations = mysqli_query($conn, $operations_query);
 
 // Récupérer une opération pour modification (admin)
 $operation_edit = null;
 if ($est_admin && isset($_GET['editer_operation'])) {
     $id_edit = intval($_GET['editer_operation']);
-    $operation_edit = mysqli_fetch_assoc($conn->query("SELECT * FROM depenses_diverses WHERE id = $id_edit"));
+    $operation_edit = mysqli_fetch_assoc(mysqli_query($conn, "SELECT * FROM depenses_diverses WHERE id = $id_edit"));
 }
 ?>
 <!DOCTYPE html>
@@ -719,7 +719,7 @@ if ($est_admin && isset($_GET['editer_operation'])) {
             <tbody>
                 <?php 
                 $has_data = false;
-                while ($op = (is_object($operations) && method_exists($operations, 'fetch_assoc') ? $operations->fetch_assoc() : mysqli_fetch_assoc($operations))): 
+                while ($op = mysqli_fetch_assoc($operations)): 
                     $has_data = true;
                     $couleur = in_array($op['type'], ['Vente', 'Entrée']) ? 'var(--success-color)' : 'var(--danger-color)';
                     $signe = in_array($op['type'], ['Vente', 'Entrée']) ? '+' : '-';

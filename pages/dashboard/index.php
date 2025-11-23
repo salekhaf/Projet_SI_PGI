@@ -19,42 +19,42 @@ $role_badge = getRoleBadge($role);
 // === STATISTIQUES ===
 
 // Ventes du jour
-$ventes_jour = mysqli_query($conn, "SELECT SUM(total) as total FROM ventes WHERE DATE(date_vente) = CURDATE()");
-$total_jour = mysqli_fetch_assoc($ventes_jour)['total'] ?? 0;
+$ventes_jour = $conn->query("SELECT SUM(total) as total FROM ventes WHERE DATE(date_vente) = CURDATE()");
+$total_jour = (is_object($ventes_jour) && method_exists($ventes_jour, 'fetch_assoc') ? $ventes_jour->fetch_assoc() : mysqli_fetch_assoc($ventes_jour))['total'] ?? 0;
 
 // Ventes de la semaine
-$ventes_semaine = mysqli_query($conn, "SELECT SUM(total) as total FROM ventes WHERE YEARWEEK(date_vente) = YEARWEEK(CURDATE())");
-$total_semaine = mysqli_fetch_assoc($ventes_semaine)['total'] ?? 0;
+$ventes_semaine = $conn->query("SELECT SUM(total) as total FROM ventes WHERE YEARWEEK(date_vente) = YEARWEEK(CURDATE())");
+$total_semaine = (is_object($ventes_semaine) && method_exists($ventes_semaine, 'fetch_assoc') ? $ventes_semaine->fetch_assoc() : mysqli_fetch_assoc($ventes_semaine))['total'] ?? 0;
 
 // Ventes du mois
-$ventes_mois = mysqli_query($conn, "SELECT SUM(total) as total FROM ventes WHERE MONTH(date_vente) = MONTH(CURDATE()) AND YEAR(date_vente) = YEAR(CURDATE())");
-$total_mois = mysqli_fetch_assoc($ventes_mois)['total'] ?? 0;
+$ventes_mois = $conn->query("SELECT SUM(total) as total FROM ventes WHERE MONTH(date_vente) = MONTH(CURDATE()) AND YEAR(date_vente) = YEAR(CURDATE())");
+$total_mois = (is_object($ventes_mois) && method_exists($ventes_mois, 'fetch_assoc') ? $ventes_mois->fetch_assoc() : mysqli_fetch_assoc($ventes_mois))['total'] ?? 0;
 
 // Total ventes
-$ventes_total = mysqli_query($conn, "SELECT SUM(total) as total FROM ventes");
-$total_ventes = mysqli_fetch_assoc($ventes_total)['total'] ?? 0;
+$ventes_total = $conn->query("SELECT SUM(total) as total FROM ventes");
+$total_ventes = (is_object($ventes_total) && method_exists($ventes_total, 'fetch_assoc') ? $ventes_total->fetch_assoc() : mysqli_fetch_assoc($ventes_total))['total'] ?? 0;
 
 // Nombre de produits
-$nb_produits = mysqli_query($conn, "SELECT COUNT(*) as total FROM produits");
-$total_produits = mysqli_fetch_assoc($nb_produits)['total'];
+$nb_produits = $conn->query("SELECT COUNT(*) as total FROM produits");
+$total_produits = (is_object($nb_produits) && method_exists($nb_produits, 'fetch_assoc') ? $nb_produits->fetch_assoc() : mysqli_fetch_assoc($nb_produits))['total'];
 
 // Stock total en valeur (prix d'achat)
-$stock_valeur = mysqli_query($conn, "SELECT SUM(quantite_stock * prix_achat) as total FROM produits");
-$valeur_stock = mysqli_fetch_assoc($stock_valeur)['total'] ?? 0;
+$stock_valeur = $conn->query("SELECT SUM(quantite_stock * prix_achat) as total FROM produits");
+$valeur_stock = (is_object($stock_valeur) && method_exists($stock_valeur, 'fetch_assoc') ? $stock_valeur->fetch_assoc() : mysqli_fetch_assoc($stock_valeur))['total'] ?? 0;
 
 // Produits en stock bas (< 10)
-$stock_bas = mysqli_query($conn, "SELECT COUNT(*) as total FROM produits WHERE quantite_stock < 10 AND quantite_stock > 0");
-$nb_stock_bas = mysqli_fetch_assoc($stock_bas)['total'];
+$stock_bas = $conn->query("SELECT COUNT(*) as total FROM produits WHERE quantite_stock < 10 AND quantite_stock > 0");
+$nb_stock_bas = (is_object($stock_bas) && method_exists($stock_bas, 'fetch_assoc') ? $stock_bas->fetch_assoc() : mysqli_fetch_assoc($stock_bas))['total'];
 
 // Produits en stock critique (0)
-$stock_critique = mysqli_query($conn, "SELECT COUNT(*) as total FROM produits WHERE quantite_stock <= 0");
-$nb_stock_critique = mysqli_fetch_assoc($stock_critique)['total'];
+$stock_critique = $conn->query("SELECT COUNT(*) as total FROM produits WHERE quantite_stock <= 0");
+$nb_stock_critique = (is_object($stock_critique) && method_exists($stock_critique, 'fetch_assoc') ? $stock_critique->fetch_assoc() : mysqli_fetch_assoc($stock_critique))['total'];
 
 // Liste des produits en stock bas/critique
-$produits_alertes = mysqli_query($conn, "SELECT id, nom, quantite_stock FROM produits WHERE quantite_stock < 10 ORDER BY quantite_stock ASC LIMIT 10");
+$produits_alertes = $conn->query("SELECT id, nom, quantite_stock FROM produits WHERE quantite_stock < 10 ORDER BY quantite_stock ASC LIMIT 10");
 
 // Produits les plus vendus (top 5)
-$top_produits = mysqli_query($conn, "
+$top_produits = $conn->query("
     SELECT p.nom, SUM(dv.quantite) as total_vendu
     FROM details_vente dv
     JOIN produits p ON dv.id_produit = p.id
@@ -64,11 +64,11 @@ $top_produits = mysqli_query($conn, "
 ");
 
 // Nombre de clients
-$nb_clients = mysqli_query($conn, "SELECT COUNT(*) as total FROM clients");
-$total_clients = mysqli_fetch_assoc($nb_clients)['total'];
+$nb_clients = $conn->query("SELECT COUNT(*) as total FROM clients");
+$total_clients = (is_object($nb_clients) && method_exists($nb_clients, 'fetch_assoc') ? $nb_clients->fetch_assoc() : mysqli_fetch_assoc($nb_clients))['total'];
 
 // Ventes récentes (5 dernières)
-$ventes_recentes = mysqli_query($conn, "
+$ventes_recentes = $conn->query("
     SELECT v.id, v.date_vente, v.total, c.nom as client_nom
     FROM ventes v
     LEFT JOIN clients c ON v.id_client = c.id
@@ -77,7 +77,7 @@ $ventes_recentes = mysqli_query($conn, "
 ");
 
 // Données pour graphique (ventes des 7 derniers jours)
-$ventes_7jours = mysqli_query($conn, "
+$ventes_7jours = $conn->query("
     SELECT DATE(date_vente) as date, SUM(total) as total
     FROM ventes
     WHERE date_vente >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
@@ -87,21 +87,21 @@ $ventes_7jours = mysqli_query($conn, "
 
 $labels_graph = [];
 $data_graph = [];
-while ($row = mysqli_fetch_assoc($ventes_7jours)) {
+while ($row = (is_object($ventes_7jours) && method_exists($ventes_7jours, 'fetch_assoc') ? $ventes_7jours->fetch_assoc() : mysqli_fetch_assoc($ventes_7jours))) {
     $labels_graph[] = date('d/m', strtotime($row['date']));
     $data_graph[] = floatval($row['total']);
 }
 
 // Vérifier les demandes d'accès en attente (pour les admins)
 $nb_demandes_attente = 0;
-$table_exists = mysqli_query($conn, "SHOW TABLES LIKE 'demandes_acces'");
-if (mysqli_num_rows($table_exists) > 0) {
+$table_exists = $conn->query("SHOW TABLES LIKE 'demandes_acces'");
+if ((is_object($table_exists) && method_exists($table_exists, 'num_rows') ? $table_exists->num_rows() : mysqli_num_rows($table_exists)) > 0) {
     if ($role === 'admin') {
-        $check_demandes = mysqli_query($conn, "SELECT COUNT(*) as total FROM demandes_acces WHERE statut = 'en_attente'");
-        $nb_demandes_attente = mysqli_fetch_assoc($check_demandes)['total'] ?? 0;
+        $check_demandes = $conn->query("SELECT COUNT(*) as total FROM demandes_acces WHERE statut = 'en_attente'");
+        $nb_demandes_attente = (is_object($check_demandes) && method_exists($check_demandes, 'fetch_assoc') ? $check_demandes->fetch_assoc() : mysqli_fetch_assoc($check_demandes))['total'] ?? 0;
     } elseif (in_array($role, ['vendeur', 'tresorier'])) {
-        $check_demandes = mysqli_query($conn, "SELECT COUNT(*) as total FROM demandes_acces WHERE id_utilisateur = $id_utilisateur AND statut = 'en_attente'");
-        $nb_demandes_attente = mysqli_fetch_assoc($check_demandes)['total'] ?? 0;
+        $check_demandes = $conn->query("SELECT COUNT(*) as total FROM demandes_acces WHERE id_utilisateur = $id_utilisateur AND statut = 'en_attente'");
+        $nb_demandes_attente = (is_object($check_demandes) && method_exists($check_demandes, 'fetch_assoc') ? $check_demandes->fetch_assoc() : mysqli_fetch_assoc($check_demandes))['total'] ?? 0;
     }
 }
 ?>
@@ -169,11 +169,11 @@ if (mysqli_num_rows($table_exists) > 0) {
         <a href="../stock/categories.php" class="nav-link">Catégories</a>
         <?php if ($role === 'admin'): ?>
           <?php
-          $table_exists = mysqli_query($conn, "SHOW TABLES LIKE 'demandes_acces'");
+          $table_exists = $conn->query("SHOW TABLES LIKE 'demandes_acces'");
           $nb_demandes_attente = 0;
-          if (mysqli_num_rows($table_exists) > 0) {
-              $check_demandes = mysqli_query($conn, "SELECT COUNT(*) as total FROM demandes_acces WHERE statut = 'en_attente'");
-              $nb_demandes_attente = mysqli_fetch_assoc($check_demandes)['total'] ?? 0;
+          if ((is_object($table_exists) && method_exists($table_exists, 'num_rows') ? $table_exists->num_rows() : mysqli_num_rows($table_exists)) > 0) {
+              $check_demandes = $conn->query("SELECT COUNT(*) as total FROM demandes_acces WHERE statut = 'en_attente'");
+              $nb_demandes_attente = (is_object($check_demandes) && method_exists($check_demandes, 'fetch_assoc') ? $check_demandes->fetch_assoc() : mysqli_fetch_assoc($check_demandes))['total'] ?? 0;
           }
           ?>
           <a href="../admin/demandes_acces.php" class="nav-link" style="position: relative;">
@@ -207,11 +207,11 @@ if (mysqli_num_rows($table_exists) > 0) {
         </p>
         <?php if (in_array($role, ['vendeur', 'tresorier'])): ?>
           <?php
-          $table_exists = mysqli_query($conn, "SHOW TABLES LIKE 'demandes_acces'");
+          $table_exists = $conn->query("SHOW TABLES LIKE 'demandes_acces'");
           $nb_demandes = 0;
-          if (mysqli_num_rows($table_exists) > 0) {
-              $check_demandes = mysqli_query($conn, "SELECT COUNT(*) as total FROM demandes_acces WHERE id_utilisateur = $id_utilisateur AND statut = 'en_attente'");
-              $nb_demandes = mysqli_fetch_assoc($check_demandes)['total'] ?? 0;
+          if ((is_object($table_exists) && method_exists($table_exists, 'num_rows') ? $table_exists->num_rows() : mysqli_num_rows($table_exists)) > 0) {
+              $check_demandes = $conn->query("SELECT COUNT(*) as total FROM demandes_acces WHERE id_utilisateur = $id_utilisateur AND statut = 'en_attente'");
+              $nb_demandes = (is_object($check_demandes) && method_exists($check_demandes, 'fetch_assoc') ? $check_demandes->fetch_assoc() : mysqli_fetch_assoc($check_demandes))['total'] ?? 0;
           }
           ?>
           <?php if ($nb_demandes > 0): ?>
@@ -228,11 +228,11 @@ if (mysqli_num_rows($table_exists) > 0) {
           <?php endif; ?>
         <?php elseif ($role === 'admin'): ?>
           <?php
-          $table_exists = mysqli_query($conn, "SHOW TABLES LIKE 'demandes_acces'");
+          $table_exists = $conn->query("SHOW TABLES LIKE 'demandes_acces'");
           $nb_demandes_attente = 0;
-          if (mysqli_num_rows($table_exists) > 0) {
-              $check_demandes = mysqli_query($conn, "SELECT COUNT(*) as total FROM demandes_acces WHERE statut = 'en_attente'");
-              $nb_demandes_attente = mysqli_fetch_assoc($check_demandes)['total'] ?? 0;
+          if ((is_object($table_exists) && method_exists($table_exists, 'num_rows') ? $table_exists->num_rows() : mysqli_num_rows($table_exists)) > 0) {
+              $check_demandes = $conn->query("SELECT COUNT(*) as total FROM demandes_acces WHERE statut = 'en_attente'");
+              $nb_demandes_attente = (is_object($check_demandes) && method_exists($check_demandes, 'fetch_assoc') ? $check_demandes->fetch_assoc() : mysqli_fetch_assoc($check_demandes))['total'] ?? 0;
           }
           ?>
           <?php if ($nb_demandes_attente > 0): ?>
@@ -292,7 +292,7 @@ if (mysqli_num_rows($table_exists) > 0) {
         <h3>⚠️ Alertes de stock</h3>
         <?php
         mysqli_data_seek($produits_alertes, 0);
-        while ($prod = mysqli_fetch_assoc($produits_alertes)):
+        while ($prod = (is_object($produits_alertes) && method_exists($produits_alertes, 'fetch_assoc') ? $produits_alertes->fetch_assoc() : mysqli_fetch_assoc($produits_alertes))):
           $class = $prod['quantite_stock'] <= 0 ? 'critique' : 'bas';
         ?>
           <div class="alerte-item <?= $class ?>">
@@ -318,7 +318,7 @@ if (mysqli_num_rows($table_exists) > 0) {
             <?php
             mysqli_data_seek($top_produits, 0);
             $rank = 1;
-            while ($prod = mysqli_fetch_assoc($top_produits)):
+            while ($prod = (is_object($top_produits) && method_exists($top_produits, 'fetch_assoc') ? $top_produits->fetch_assoc() : mysqli_fetch_assoc($top_produits))):
             ?>
               <li style="padding: 10px; margin: 5px 0; background: #f8f9fa; border-radius: 8px;">
                 <strong>#<?= $rank ?></strong> <?= htmlspecialchars($prod['nom']) ?> - 
@@ -347,7 +347,7 @@ if (mysqli_num_rows($table_exists) > 0) {
           <tbody>
             <?php
             mysqli_data_seek($ventes_recentes, 0);
-            while ($vente = mysqli_fetch_assoc($ventes_recentes)):
+            while ($vente = (is_object($ventes_recentes) && method_exists($ventes_recentes, 'fetch_assoc') ? $ventes_recentes->fetch_assoc() : mysqli_fetch_assoc($ventes_recentes))):
             ?>
               <tr>
                 <td><?= date('d/m/Y H:i', strtotime($vente['date_vente'])) ?></td>
@@ -376,11 +376,11 @@ if (mysqli_num_rows($table_exists) > 0) {
         </a>
         <?php if ($role === 'admin'): ?>
           <?php
-          $table_exists = mysqli_query($conn, "SHOW TABLES LIKE 'demandes_acces'");
+          $table_exists = $conn->query("SHOW TABLES LIKE 'demandes_acces'");
           $nb_demandes_attente = 0;
-          if (mysqli_num_rows($table_exists) > 0) {
-              $check_demandes = mysqli_query($conn, "SELECT COUNT(*) as total FROM demandes_acces WHERE statut = 'en_attente'");
-              $nb_demandes_attente = mysqli_fetch_assoc($check_demandes)['total'] ?? 0;
+          if ((is_object($table_exists) && method_exists($table_exists, 'num_rows') ? $table_exists->num_rows() : mysqli_num_rows($table_exists)) > 0) {
+              $check_demandes = $conn->query("SELECT COUNT(*) as total FROM demandes_acces WHERE statut = 'en_attente'");
+              $nb_demandes_attente = (is_object($check_demandes) && method_exists($check_demandes, 'fetch_assoc') ? $check_demandes->fetch_assoc() : mysqli_fetch_assoc($check_demandes))['total'] ?? 0;
           }
           ?>
           <a href="../admin/demandes_acces.php" class="stat-card" style="text-decoration: none; color: inherit; display: block; background: linear-gradient(135deg, #dc3545, #c82333); color: white;">

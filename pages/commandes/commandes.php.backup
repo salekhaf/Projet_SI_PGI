@@ -31,8 +31,8 @@ if ($peut_commander && isset($_POST['ajouter'])) {
     // Insertion dans la table "achats"
     $sql_achat = "INSERT INTO achats (id_fournisseur, date_achat, montant_total) 
                   VALUES ($id_fournisseur, NOW(), $total_general)";
-    if ($conn->query($sql_achat)) {
-        $id_achat = db_get_insert_id($conn);
+    if (mysqli_query($conn, $sql_achat)) {
+        $id_achat = mysqli_insert_id($conn);
 
         // Insertion dans "details_achat" et mise à jour du stock
         foreach ($produits as $i => $id_produit) {
@@ -40,9 +40,9 @@ if ($peut_commander && isset($_POST['ajouter'])) {
             $qte = intval($quantites[$i]);
             $prix = floatval($prix_achats[$i]);
             if ($id_produit > 0 && $qte > 0) {
-                $conn->query("INSERT INTO details_achat (id_achat, id_produit, quantite, prix_achat)
+                mysqli_query($conn, "INSERT INTO details_achat (id_achat, id_produit, quantite, prix_achat)
                                      VALUES ($id_achat, $id_produit, $qte, $prix)");
-                $conn->query("UPDATE produits 
+                mysqli_query($conn, "UPDATE produits 
                                      SET quantite_stock = quantite_stock + $qte,
                                          prix_achat = $prix
                                      WHERE id = $id_produit");
@@ -50,22 +50,22 @@ if ($peut_commander && isset($_POST['ajouter'])) {
         }
         $message = "✅ Commande enregistrée avec succès.";
     } else {
-        $message = "❌ Erreur lors de l'enregistrement : " . (isset($GLOBALS['is_postgresql']) && is_object($conn) && get_class($conn) === 'PostgreSQLConnection' ? $conn->error() : mysqli_error($conn));
+        $message = "❌ Erreur lors de l'enregistrement : " . mysqli_error($conn);
     }
 }
 
 // --- SUPPRESSION D'UNE COMMANDE ---
 if ($peut_commander && isset($_GET['supprimer'])) {
     $id = intval($_GET['supprimer']);
-    $conn->query("DELETE FROM achats WHERE id = $id");
+    mysqli_query($conn, "DELETE FROM achats WHERE id = $id");
     header("Location: commandes.php");
     exit();
 }
 
 // --- LISTES ---
-$fournisseurs = $conn->query("SELECT id, nom FROM fournisseurs ORDER BY nom ASC");
-$produits = $conn->query("SELECT id, nom, prix_achat FROM produits ORDER BY nom ASC");
-$achats = $conn->query("
+$fournisseurs = mysqli_query($conn, "SELECT id, nom FROM fournisseurs ORDER BY nom ASC");
+$produits = mysqli_query($conn, "SELECT id, nom, prix_achat FROM produits ORDER BY nom ASC");
+$achats = mysqli_query($conn, "
     SELECT a.id, a.date_achat, a.montant_total, f.nom AS fournisseur
     FROM achats a
     JOIN fournisseurs f ON a.id_fournisseur = f.id
@@ -159,7 +159,7 @@ function setPrix(select) {
     <label>Fournisseur :</label>
     <select name="id_fournisseur" required>
         <option value="">-- Sélectionner un fournisseur --</option>
-        <?php while ($f = (is_object($fournisseurs) && method_exists($fournisseurs, 'fetch_assoc') ? $fournisseurs->fetch_assoc() : mysqli_fetch_assoc($fournisseurs))): ?>
+        <?php while ($f = mysqli_fetch_assoc($fournisseurs)): ?>
             <option value="<?= $f['id'] ?>"><?= htmlspecialchars($f['nom']) ?></option>
         <?php endwhile; ?>
     </select>
@@ -181,7 +181,7 @@ function setPrix(select) {
                     <option value="">-- Choisir un produit --</option>
                     <?php
                     mysqli_data_seek($produits, 0);
-                    while ($p = (is_object($produits) && method_exists($produits, 'fetch_assoc') ? $produits->fetch_assoc() : mysqli_fetch_assoc($produits))): ?>
+                    while ($p = mysqli_fetch_assoc($produits)): ?>
                         <option value="<?= $p['id'] ?>" data-prix="<?= $p['prix_achat'] ?>">
                             <?= htmlspecialchars($p['nom']) ?>
                         </option>
@@ -226,7 +226,7 @@ function setPrix(select) {
 </tr>
             </thead>
             <tbody>
-<?php while ($a = (is_object($achats) && method_exists($achats, 'fetch_assoc') ? $achats->fetch_assoc() : mysqli_fetch_assoc($achats))): ?>
+<?php while ($a = mysqli_fetch_assoc($achats)): ?>
 <tr>
     <td><?= $a['id'] ?></td>
     <td><?= htmlspecialchars($a['fournisseur']) ?></td>

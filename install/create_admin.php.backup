@@ -16,10 +16,10 @@ $admin_password = 'admin123'; // Changez ce mot de passe après la première con
 $admin_nom = 'Administrateur Principal';
 
 // Vérifier si un admin existe déjà
-$check = $conn->query("SELECT id, email, mot_de_passe FROM utilisateurs WHERE role = 'admin' LIMIT 1");
+$check = mysqli_query($conn, "SELECT id, email, mot_de_passe FROM utilisateurs WHERE role = 'admin' LIMIT 1");
 
-if ((is_object($check) && method_exists($check, 'num_rows') ? $check->num_rows() : mysqli_num_rows($check)) > 0) {
-    $existing_admin = (is_object($check) && method_exists($check, 'fetch_assoc') ? $check->fetch_assoc() : mysqli_fetch_assoc($check));
+if (mysqli_num_rows($check) > 0) {
+    $existing_admin = mysqli_fetch_assoc($check);
     $needs_fix = true;
     
     // Vérifier si le mot de passe est en bcrypt
@@ -117,10 +117,10 @@ WHERE email = 'admin@epicerie.com' AND role = 'admin';
 // Créer le compte admin
 $motdepasse_hache = password_hash($admin_password, PASSWORD_DEFAULT);
 
-$stmt = $conn->prepare("INSERT INTO utilisateurs (nom, email, mot_de_passe, role) VALUES (?, ?, ?, 'admin')");
-$stmt->bind_param("sss", $admin_nom, $admin_email, $motdepasse_hache);
+$stmt = mysqli_prepare($conn, "INSERT INTO utilisateurs (nom, email, mot_de_passe, role) VALUES (?, ?, ?, 'admin')");
+mysqli_stmt_bind_param($stmt, "sss", $admin_nom, $admin_email, $motdepasse_hache);
 
-if ($stmt->execute()) {
+if (mysqli_stmt_execute($stmt)) {
     echo "<!DOCTYPE html>
     <html lang='fr'>
     <head>
@@ -185,13 +185,13 @@ if ($stmt->execute()) {
         <div class='container'>
             <h1>❌ Erreur</h1>
             <div class='error'>
-                <p>Erreur lors de la création du compte admin : " . (isset($GLOBALS['is_postgresql']) && is_object($conn) && get_class($conn) === 'PostgreSQLConnection' ? $conn->error() : mysqli_error($conn)) . "</p>
+                <p>Erreur lors de la création du compte admin : " . mysqli_error($conn) . "</p>
             </div>
         </div>
     </body>
     </html>";
 }
 
-$stmt->close();
+mysqli_stmt_close($stmt);
 ?>
 
