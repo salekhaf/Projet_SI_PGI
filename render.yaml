@@ -1,0 +1,16 @@
+# Configuration Render pour Smart Stock
+# Note: Render nécessite une base de données MySQL séparée
+
+services:
+  - type: web
+    name: smart-stock
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: PHP_VERSION
+        value: 8.2
+      - key: APACHE_DOCUMENT_ROOT
+        value: /var/www/html
+      # Les variables de base de données seront configurées dans le dashboard Render
+      # après la création de la base de données MySQL

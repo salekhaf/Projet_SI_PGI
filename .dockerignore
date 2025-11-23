@@ -1,0 +1,14 @@
+# Fichiers à exclure du build Docker
+.git
+.gitignore
+.vscode
+.idea
+*.md
+docs/
+node_modules/
+vendor/fpdf/tutorial/
+vendor/fpdf/doc/
+*.log
+.DS_Store
+Thumbs.db
+

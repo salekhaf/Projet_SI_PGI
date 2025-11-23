@@ -2,6 +2,7 @@
 /**
  * Helper pour gérer les permissions des utilisateurs
  */
+include_once(__DIR__ . '/db_compat_helper.php');
 
 /**
  * Liste des permissions disponibles dans l'application
@@ -51,8 +52,7 @@ function getPermissionsDisponibles() {
  */
 function aPermission($conn, $id_utilisateur, $permission) {
     // Vérifier si la table existe
-    $check_table = mysqli_query($conn, "SHOW TABLES LIKE 'permissions_utilisateurs'");
-    if (mysqli_num_rows($check_table) == 0) {
+    if (!table_exists($conn, 'permissions_utilisateurs')) {
         return false;
     }
     
@@ -75,8 +75,7 @@ function aAuMoinsUnePermission($conn, $id_utilisateur, $permissions) {
     }
     
     // Vérifier si la table existe
-    $check_table = mysqli_query($conn, "SHOW TABLES LIKE 'permissions_utilisateurs'");
-    if (mysqli_num_rows($check_table) == 0) {
+    if (!table_exists($conn, 'permissions_utilisateurs')) {
         return false;
     }
     
@@ -99,8 +98,7 @@ function aAuMoinsUnePermission($conn, $id_utilisateur, $permissions) {
  */
 function getPermissionsUtilisateur($conn, $id_utilisateur) {
     // Vérifier si la table existe
-    $check_table = mysqli_query($conn, "SHOW TABLES LIKE 'permissions_utilisateurs'");
-    if (mysqli_num_rows($check_table) == 0) {
+    if (!table_exists($conn, 'permissions_utilisateurs')) {
         return [];
     }
     
@@ -123,8 +121,7 @@ function getPermissionsUtilisateur($conn, $id_utilisateur) {
  */
 function ajouterPermission($conn, $id_utilisateur, $permission, $id_admin_attribueur = null, $id_demande_acces = null) {
     // Vérifier si la table existe, sinon la créer
-    $check_table = mysqli_query($conn, "SHOW TABLES LIKE 'permissions_utilisateurs'");
-    if (mysqli_num_rows($check_table) == 0) {
+    if (!table_exists($conn, 'permissions_utilisateurs')) {
         $create_table = "CREATE TABLE IF NOT EXISTS permissions_utilisateurs (
             id INT AUTO_INCREMENT PRIMARY KEY,
             id_utilisateur INT NOT NULL,
