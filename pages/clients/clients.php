@@ -323,16 +323,16 @@ if ($peut_modifier && isset($_GET['edit'])) {
 <?php foreach ($result as $row): ?>
 <tr>
     <td><?= $row['id'] ?></td>
-    <td><?= htmlspecialchars($row['nom']) ?></td>
-    <td><?= htmlspecialchars($row['telephone']) ?></td>
-    <td><?= htmlspecialchars($row['email']) ?></td>
-    <td><?= htmlspecialchars($row['adresse']) ?></td>
+    <td><?= htmlspecialchars($row['nom'] ?? '') ?></td>
+    <td><?= htmlspecialchars($row['telephone'] ?? '') ?></td>
+    <td><?= htmlspecialchars($row['email'] ?? '') ?></td>
+    <td><?= htmlspecialchars($row['adresse'] ?? '') ?></td>
 
     <?php if ($peut_modifier): ?>
     <td>
         <a href="?edit=<?= $row['id'] ?>" class="btn btn-info btn-sm">✏️ Modifier</a>
         <a href="?supprimer=<?= $row['id'] ?>" class="btn btn-danger btn-sm"
-           onclick="return confirm('Supprimer ce client ?')">🗑️</a>
+           onclick="return confirm('Êtes-vous sûr ?')">🗑️ Supprimer</a>
     </td>
     <?php endif; ?>
 </tr>
