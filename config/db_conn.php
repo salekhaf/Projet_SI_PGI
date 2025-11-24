@@ -1,239 +1,53 @@
 <?php
-// Configuration de la base de données
-// Support MySQL (développement local) et PostgreSQL (production Render)
-// Détection automatique du type de base de données
+/**
+ * Connexion universelle MySQL / PostgreSQL via PDO
+ * Compatible Render (PostgreSQL) et XAMPP local (MySQL)
+ */
 
-$db_type = getenv('DB_TYPE') ?: (getenv('DB_HOST') && strpos(getenv('DB_HOST'), 'postgres') !== false ? 'postgresql' : 'mysql');
-$serveur = getenv('DB_HOST') ?: 'localhost';
-$utilisateur = getenv('DB_USER') ?: 'root';
-$motdepasse = getenv('DB_PASSWORD') ?: '';
-$basededonnees = getenv('DB_NAME') ?: 'epicerie_db';
+$db_type = getenv('DB_TYPE') ?: 'mysql';
+$host = getenv('DB_HOST') ?: 'localhost';
+$dbname = getenv('DB_NAME') ?: 'epicerie_db';
+$user = getenv('DB_USER') ?: 'root';
+$pass = getenv('DB_PASSWORD') ?: '';
 $port = getenv('DB_PORT') ?: null;
 
-// Si c'est PostgreSQL (Render)
-if ($db_type === 'postgresql' || strpos($serveur, 'postgres') !== false || strpos($serveur, 'dpg-') !== false) {
-    // Utiliser PDO pour PostgreSQL
-    try {
-        if ($port) {
-            $dsn = "pgsql:host=$serveur;port=$port;dbname=$basededonnees";
-        } else {
-            $dsn = "pgsql:host=$serveur;dbname=$basededonnees";
-        }
-        
-        $pdo = new PDO($dsn, $utilisateur, $motdepasse, [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        ]);
-        
-        // Créer une classe de compatibilité mysqli pour PostgreSQL
-        class PostgreSQLConnection {
-            private $pdo;
-            private $last_result = null;
-            
-            public function __construct($pdo) {
-                $this->pdo = $pdo;
-            }
-            
-            public function query($sql) {
-                // Convertir SHOW TABLES en requête PostgreSQL
-                if (preg_match("/SHOW TABLES LIKE '([^']+)'/i", $sql, $matches)) {
-                    $table_name = $matches[1];
-                    $sql = "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = '$table_name')";
-                    $stmt = $this->pdo->query($sql);
-                    $exists = $stmt->fetchColumn();
-                    // Retourner un résultat qui simule mysqli avec 0 ou 1 ligne
-                    return new PostgreSQLShowTablesResult($exists);
-                }
-                
-                $sql = $this->convertSQL($sql);
-                try {
-                    $stmt = $this->pdo->query($sql);
-                    $this->last_result = new PostgreSQLResult($stmt);
-                    return $this->last_result;
-                } catch (PDOException $e) {
-                    error_log("PostgreSQL Error: " . $e->getMessage() . " - SQL: " . $sql);
-                    return false;
-                }
-            }
-            
-            public function prepare($sql) {
-                $sql = $this->convertSQL($sql);
-                return new PostgreSQLStatement($this->pdo->prepare($sql), $this->pdo);
-            }
-            
-            public function insert_id() {
-                // PostgreSQL utilise lastval() ou RETURNING
-                $result = $this->pdo->query("SELECT lastval()");
-                return $result->fetchColumn();
-            }
-            
-            private function convertSQL($sql) {
-                // Conversions MySQL -> PostgreSQL
-                $sql = preg_replace('/\bCURDATE\(\)/i', 'CURRENT_DATE', $sql);
-                $sql = preg_replace('/\bNOW\(\)/i', 'NOW()', $sql); // Identique
-                
-                // YEARWEEK() -> Approximation avec EXTRACT
-                $sql = preg_replace('/YEARWEEK\(([^)]+)\)/i', "EXTRACT(YEAR FROM $1) * 100 + EXTRACT(WEEK FROM $1)", $sql);
-                
-                // DATE_SUB(CURDATE(), INTERVAL X DAY) -> CURRENT_DATE - INTERVAL 'X' DAY
-                $sql = preg_replace("/DATE_SUB\(CURDATE\(\), INTERVAL\s+(\d+)\s+DAY\)/i", "CURRENT_DATE - INTERVAL '$1' DAY", $sql);
-                $sql = preg_replace("/DATE_SUB\(CURRENT_DATE, INTERVAL\s+(\d+)\s+DAY\)/i", "CURRENT_DATE - INTERVAL '$1' DAY", $sql);
-                
-                // DATE() fonctionne aussi en PostgreSQL
-                // MONTH() -> EXTRACT(MONTH FROM ...)
-                $sql = preg_replace('/\bMONTH\(([^)]+)\)/i', 'EXTRACT(MONTH FROM $1)', $sql);
-                // YEAR() -> EXTRACT(YEAR FROM ...)
-                $sql = preg_replace('/\bYEAR\(([^)]+)\)/i', 'EXTRACT(YEAR FROM $1)', $sql);
-                
-                return $sql;
-            }
-            
-            public function error() {
-                $error = $this->pdo->errorInfo();
-                return $error[2] ?? '';
-            }
-        }
-        
-        class PostgreSQLShowTablesResult {
-            private $exists;
-            
-            public function __construct($exists) {
-                $this->exists = $exists;
-            }
-            
-            public function num_rows() {
-                return $this->exists ? 1 : 0;
-            }
-        }
-        
-        class PostgreSQLResult {
-            private $stmt;
-            private $data = [];
-            private $position = 0;
-            
-            public function __construct($stmt) {
-                $this->stmt = $stmt;
-                $this->data = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            }
-            
-            public function fetch_assoc() {
-                if ($this->position < count($this->data)) {
-                    return $this->data[$this->position++];
-                }
-                return false;
-            }
-            
-            public function num_rows() {
-                return count($this->data);
-            }
-            
-            public function data_seek($offset) {
-                $this->position = $offset;
-            }
-        }
-        
-        class PostgreSQLStatement {
-            private $stmt;
-            private $pdo;
-            private $bound_params = [];
-            
-            public function __construct($stmt, $pdo) {
-                $this->stmt = $stmt;
-                $this->pdo = $pdo;
-            }
-            
-            public function bind_param($types, ...$params) {
-                // Stocker les paramètres pour bind_param qui est appelé avec des références
-                // Note: mysqli_stmt_bind_param attend des références, mais PDO bindValue accepte les valeurs
-                $this->bound_params = $params;
-                $i = 1;
-                $types_array = str_split($types); // Convertir "is" en ['i', 's']
-                
-                foreach ($params as $index => $param) {
-                    $type = $types_array[$index] ?? 's';
-                    $pdo_type = PDO::PARAM_STR;
-                    if ($type === 'i') {
-                        $pdo_type = PDO::PARAM_INT;
-                    } elseif ($type === 'd') {
-                        $pdo_type = PDO::PARAM_STR; // DECIMAL comme string
-                    } elseif ($type === 'b') {
-                        $pdo_type = PDO::PARAM_LOB;
-                    }
-                    $this->stmt->bindValue($i++, $param, $pdo_type);
-                }
-                return true;
-            }
-            
-            public function execute() {
-                return $this->stmt->execute();
-            }
-            
-            public function get_result() {
-                return new PostgreSQLResult($this->stmt);
-            }
-            
-            public function close() {
-                $this->stmt = null;
-            }
-        }
-        
-        // Créer l'objet de connexion compatible mysqli
-        $conn = new PostgreSQLConnection($pdo);
-        
-        // Variable globale pour insert_id
-        $GLOBALS['pdo_conn'] = $pdo;
-        $GLOBALS['is_postgresql'] = true;
-        $GLOBALS['postgresql_conn'] = $conn;
-        
-        // IMPORTANT: Créer des fonctions globales qui remplacent mysqli_*
-        // Ces fonctions sont chargées AVANT que le code ne les utilise
-        // Elles détectent automatiquement le type de connexion
-        
-        // Sauvegarder les fonctions originales si elles existent
-        if (function_exists('mysqli_prepare') && !function_exists('mysqli_prepare_original')) {
-            // On ne peut pas vraiment sauvegarder, mais on peut créer des wrappers conditionnels
-        }
-        
-        // Créer des fonctions de remplacement qui seront utilisées
-        // Note: On ne peut pas vraiment surcharger, donc on va créer un système de proxy
-        
-    } catch (PDOException $e) {
-        die("Erreur de connexion PostgreSQL : " . $e->getMessage());
-    }
+// Construction du DSN
+if ($db_type === 'postgresql') {
+
+    $port = $port ?: 5432;
+    $dsn = "pgsql:host={$host};port={$port};dbname={$dbname}";
+
 } else {
-    // MySQL (développement local)
-    if ($port) {
-        $conn = mysqli_connect($serveur, $utilisateur, $motdepasse, $basededonnees, $port);
-    } else {
-        $conn = mysqli_connect($serveur, $utilisateur, $motdepasse, $basededonnees);
-    }
-    
-    if (!$conn) {
-        die("Erreur de connexion MySQL : " . mysqli_connect_error());
-    }
-    
-    mysqli_set_charset($conn, "utf8mb4");
+
+    $port = $port ?: 3306;
+    $dsn = "mysql:host={$host};port={$port};dbname={$dbname};charset=utf8mb4";
 }
 
-// Fonction helper pour obtenir le dernier ID inséré (compatible MySQL et PostgreSQL)
-// Utilisez cette fonction au lieu de mysqli_insert_id() directement
-if (!function_exists('db_get_insert_id')) {
-    function db_get_insert_id($connection) {
-        if (isset($GLOBALS['pdo_conn'])) {
-            // PostgreSQL
-            try {
-                $result = $GLOBALS['pdo_conn']->query("SELECT lastval()");
-                return $result->fetchColumn();
-            } catch (Exception $e) {
-                return 0;
-            }
-        } else {
-            // MySQL - utiliser la fonction native
-            if (is_object($connection) && method_exists($connection, 'insert_id')) {
-                return $connection->insert_id();
-            }
-            return mysqli_insert_id($connection);
-        }
+try {
+    // Connexion universelle via PDO
+    $pdo = new PDO($dsn, $user, $pass, [
+        PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    ]);
+
+} catch (PDOException $e) {
+    die("Erreur de connexion à la base : " . $e->getMessage());
+}
+
+/**
+ * Fonction générique pour récupérer le dernier ID
+ * compatible MySQL et PostgreSQL
+ */
+function db_last_id(PDO $pdo, string $table = null, string $column = 'id') {
+
+    if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'pgsql') {
+
+        // PostgreSQL : lastval() seulement si une séquence a été utilisée dans cette session
+        return $pdo->query("SELECT lastval()")->fetchColumn();
+
+    } else {
+        // MySQL
+        return $pdo->lastInsertId();
     }
 }
 ?>

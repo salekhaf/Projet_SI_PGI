@@ -1,578 +1,206 @@
 <?php
-// index.php — Tableau de bord principal du PGI Épicerie
 session_start();
 
-// Vérifie si l'utilisateur est connecté
 if (!isset($_SESSION['id_utilisateur'])) {
     header("Location: ../auth/auth.php");
     exit();
 }
 
-include('../../config/db_conn.php');
+include('../../config/db_conn.php'); // $pdo
 include('../../includes/role_helper.php');
 
 $nom = $_SESSION['nom'];
 $role = $_SESSION['role'];
 $id_utilisateur = $_SESSION['id_utilisateur'];
-$role_badge = getRoleBadge($role);
 
-// === STATISTIQUES ===
+/*-----------------------------------------------
+    STATISTIQUES (COMPATIBLES POSTGRESQL)
+------------------------------------------------*/
 
-// Ventes du jour
-$ventes_jour = $conn->query("SELECT SUM(total) as total FROM ventes WHERE DATE(date_vente) = CURDATE()");
-$total_jour = (is_object($ventes_jour) && method_exists($ventes_jour, 'fetch_assoc') ? $ventes_jour->fetch_assoc() : mysqli_fetch_assoc($ventes_jour))['total'] ?? 0;
+// ventes du jour
+$sql = "SELECT SUM(total) AS total 
+        FROM ventes 
+        WHERE DATE(date_vente) = CURRENT_DATE";
+$total_jour = ($pdo->query($sql)->fetch()['total']) ?? 0;
 
-// Ventes de la semaine
-$ventes_semaine = $conn->query("SELECT SUM(total) as total FROM ventes WHERE YEARWEEK(date_vente) = YEARWEEK(CURDATE())");
-$total_semaine = (is_object($ventes_semaine) && method_exists($ventes_semaine, 'fetch_assoc') ? $ventes_semaine->fetch_assoc() : mysqli_fetch_assoc($ventes_semaine))['total'] ?? 0;
+// ventes semaine (PostgreSQL)
+$sql = "SELECT SUM(total) AS total
+        FROM ventes
+        WHERE date_vente >= date_trunc('week', CURRENT_DATE)";
+$total_semaine = ($pdo->query($sql)->fetch()['total']) ?? 0;
 
-// Ventes du mois
-$ventes_mois = $conn->query("SELECT SUM(total) as total FROM ventes WHERE MONTH(date_vente) = MONTH(CURDATE()) AND YEAR(date_vente) = YEAR(CURDATE())");
-$total_mois = (is_object($ventes_mois) && method_exists($ventes_mois, 'fetch_assoc') ? $ventes_mois->fetch_assoc() : mysqli_fetch_assoc($ventes_mois))['total'] ?? 0;
+// ventes mois
+$sql = "SELECT SUM(total) AS total
+        FROM ventes
+        WHERE EXTRACT(MONTH FROM date_vente) = EXTRACT(MONTH FROM CURRENT_DATE)
+        AND EXTRACT(YEAR FROM date_vente) = EXTRACT(YEAR FROM CURRENT_DATE)";
+$total_mois = ($pdo->query($sql)->fetch()['total']) ?? 0;
 
-// Total ventes
-$ventes_total = $conn->query("SELECT SUM(total) as total FROM ventes");
-$total_ventes = (is_object($ventes_total) && method_exists($ventes_total, 'fetch_assoc') ? $ventes_total->fetch_assoc() : mysqli_fetch_assoc($ventes_total))['total'] ?? 0;
+// total ventes
+$sql = "SELECT SUM(total) AS total FROM ventes";
+$total_ventes = ($pdo->query($sql)->fetch()['total']) ?? 0;
 
-// Nombre de produits
-$nb_produits = $conn->query("SELECT COUNT(*) as total FROM produits");
-$total_produits = (is_object($nb_produits) && method_exists($nb_produits, 'fetch_assoc') ? $nb_produits->fetch_assoc() : mysqli_fetch_assoc($nb_produits))['total'];
+// nombre de produits
+$sql = "SELECT COUNT(*) AS total FROM produits";
+$total_produits = ($pdo->query($sql)->fetch()['total']) ?? 0;
 
-// Stock total en valeur (prix d'achat)
-$stock_valeur = $conn->query("SELECT SUM(quantite_stock * prix_achat) as total FROM produits");
-$valeur_stock = (is_object($stock_valeur) && method_exists($stock_valeur, 'fetch_assoc') ? $stock_valeur->fetch_assoc() : mysqli_fetch_assoc($stock_valeur))['total'] ?? 0;
+// valeur totale stock
+$sql = "SELECT SUM(quantite_stock * prix_achat) AS total FROM produits";
+$valeur_stock = ($pdo->query($sql)->fetch()['total']) ?? 0;
 
-// Produits en stock bas (< 10)
-$stock_bas = $conn->query("SELECT COUNT(*) as total FROM produits WHERE quantite_stock < 10 AND quantite_stock > 0");
-$nb_stock_bas = (is_object($stock_bas) && method_exists($stock_bas, 'fetch_assoc') ? $stock_bas->fetch_assoc() : mysqli_fetch_assoc($stock_bas))['total'];
+// stock bas
+$sql = "SELECT COUNT(*) AS total FROM produits WHERE quantite_stock < 10 AND quantite_stock > 0";
+$nb_stock_bas = ($pdo->query($sql)->fetch()['total']) ?? 0;
 
-// Produits en stock critique (0)
-$stock_critique = $conn->query("SELECT COUNT(*) as total FROM produits WHERE quantite_stock <= 0");
-$nb_stock_critique = (is_object($stock_critique) && method_exists($stock_critique, 'fetch_assoc') ? $stock_critique->fetch_assoc() : mysqli_fetch_assoc($stock_critique))['total'];
+// stock critique
+$sql = "SELECT COUNT(*) AS total FROM produits WHERE quantite_stock <= 0";
+$nb_stock_critique = ($pdo->query($sql)->fetch()['total']) ?? 0;
 
-// Liste des produits en stock bas/critique
-$produits_alertes = $conn->query("SELECT id, nom, quantite_stock FROM produits WHERE quantite_stock < 10 ORDER BY quantite_stock ASC LIMIT 10");
+// liste des alertes
+$sql = "SELECT id, nom, quantite_stock 
+        FROM produits 
+        WHERE quantite_stock < 10 
+        ORDER BY quantite_stock ASC 
+        LIMIT 10";
+$produits_alertes = $pdo->query($sql)->fetchAll();
 
-// Produits les plus vendus (top 5)
-$top_produits = $conn->query("
-    SELECT p.nom, SUM(dv.quantite) as total_vendu
-    FROM details_vente dv
-    JOIN produits p ON dv.id_produit = p.id
-    GROUP BY p.id, p.nom
-    ORDER BY total_vendu DESC
-    LIMIT 5
-");
+// top ventes
+$sql = "SELECT p.nom, SUM(dv.quantite) AS total_vendu
+        FROM details_vente dv
+        JOIN produits p ON dv.id_produit = p.id
+        GROUP BY p.nom
+        ORDER BY total_vendu DESC
+        LIMIT 5";
+$top_produits = $pdo->query($sql)->fetchAll();
 
-// Nombre de clients
-$nb_clients = $conn->query("SELECT COUNT(*) as total FROM clients");
-$total_clients = (is_object($nb_clients) && method_exists($nb_clients, 'fetch_assoc') ? $nb_clients->fetch_assoc() : mysqli_fetch_assoc($nb_clients))['total'];
+// nombre de clients
+$sql = "SELECT COUNT(*) AS total FROM clients";
+$total_clients = ($pdo->query($sql)->fetch()['total']) ?? 0;
 
-// Ventes récentes (5 dernières)
-$ventes_recentes = $conn->query("
-    SELECT v.id, v.date_vente, v.total, c.nom as client_nom
-    FROM ventes v
-    LEFT JOIN clients c ON v.id_client = c.id
-    ORDER BY v.date_vente DESC
-    LIMIT 5
-");
+// ventes récentes
+$sql = "SELECT v.id, v.date_vente, v.total, c.nom AS client_nom
+        FROM ventes v
+        LEFT JOIN clients c ON v.id_client = c.id
+        ORDER BY date_vente DESC
+        LIMIT 5";
+$ventes_recentes = $pdo->query($sql)->fetchAll();
 
-// Données pour graphique (ventes des 7 derniers jours)
-$ventes_7jours = $conn->query("
-    SELECT DATE(date_vente) as date, SUM(total) as total
-    FROM ventes
-    WHERE date_vente >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-    GROUP BY DATE(date_vente)
-    ORDER BY date ASC
-");
+// données 7 jours
+$sql = "SELECT DATE(date_vente) AS date, SUM(total) AS total
+        FROM ventes
+        WHERE date_vente >= CURRENT_DATE - INTERVAL '7 days'
+        GROUP BY DATE(date_vente)
+        ORDER BY date ASC";
+$data = $pdo->query($sql)->fetchAll();
 
 $labels_graph = [];
 $data_graph = [];
-while ($row = (is_object($ventes_7jours) && method_exists($ventes_7jours, 'fetch_assoc') ? $ventes_7jours->fetch_assoc() : mysqli_fetch_assoc($ventes_7jours))) {
-    $labels_graph[] = date('d/m', strtotime($row['date']));
+
+foreach ($data as $row) {
+    $labels_graph[] = date("d/m", strtotime($row['date']));
     $data_graph[] = floatval($row['total']);
 }
 
-// Vérifier l'accès à la trésorerie
-$acces_tresorerie = false;
-if ($role === 'admin' || $role === 'tresorier') {
-    $acces_tresorerie = true;
-} else {
-    include_once('../../includes/permissions_helper.php');
-    if (function_exists('aPermission')) {
-        $acces_tresorerie = aPermission($conn, $id_utilisateur, 'acces_tresorerie');
-    }
-}
-
-// Vérifier les demandes d'accès en attente (pour les admins)
-$nb_demandes_attente = 0;
-$table_exists = $conn->query("SHOW TABLES LIKE 'demandes_acces'");
-if ((is_object($table_exists) && method_exists($table_exists, 'num_rows') ? $table_exists->num_rows() : mysqli_num_rows($table_exists)) > 0) {
-    if ($role === 'admin') {
-        $check_demandes = $conn->query("SELECT COUNT(*) as total FROM demandes_acces WHERE statut = 'en_attente'");
-        $nb_demandes_attente = (is_object($check_demandes) && method_exists($check_demandes, 'fetch_assoc') ? $check_demandes->fetch_assoc() : mysqli_fetch_assoc($check_demandes))['total'] ?? 0;
-    } elseif (in_array($role, ['vendeur', 'tresorier'])) {
-        $check_demandes = $conn->query("SELECT COUNT(*) as total FROM demandes_acces WHERE id_utilisateur = $id_utilisateur AND statut = 'en_attente'");
-        $nb_demandes_attente = (is_object($check_demandes) && method_exists($check_demandes, 'fetch_assoc') ? $check_demandes->fetch_assoc() : mysqli_fetch_assoc($check_demandes))['total'] ?? 0;
-    }
-}
 ?>
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8">
-  <title>Tableau de bord - Smart Stock</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <link rel="stylesheet" href="../../assets/css/styles_connected.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <style>
-    /* Styles spécifiques au dashboard - Cohérents pour tous les rôles */
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 20px;
-      margin-bottom: 30px;
-    }
-    .stat-card {
-      background: white;
-      padding: 20px;
-      border-radius: var(--border-radius);
-      box-shadow: var(--box-shadow);
-      border-left: 4px solid var(--primary-color);
-      transition: var(--transition);
-    }
-    .stat-card {
-      position: relative;
-      overflow: hidden;
-    }
-    .stat-card::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: -100%;
-      width: 100%;
-      height: 100%;
-      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
-      transition: left 0.5s;
-    }
-    .stat-card:hover {
-      transform: translateY(-5px);
-      box-shadow: var(--box-shadow-hover);
-      border-left-width: 6px;
-    }
-    .stat-card:hover::before {
-      left: 100%;
-    }
-    .stat-card h3 {
-      font-size: 0.9em;
-      color: #666;
-      margin: 0 0 10px 0;
-      text-transform: uppercase;
-      font-weight: 600;
-    }
-    .stat-card .value {
-      font-size: 2em;
-      font-weight: bold;
-      color: var(--dark-color);
-    }
-    .stat-card.alertes {
-      border-left-color: var(--danger-color);
-    }
-    .stat-card.alertes h3 {
-      color: var(--danger-color);
-    }
-    .charts-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-      gap: 20px;
-      margin-bottom: 30px;
-    }
-    .chart-box {
-      background: white;
-      padding: 20px;
-      border-radius: var(--border-radius);
-      box-shadow: var(--box-shadow);
-    }
-    .chart-box h3 {
-      color: var(--dark-color);
-      margin-bottom: 15px;
-      font-weight: 600;
-    }
-    .alertes-box {
-      background: white;
-      padding: 20px;
-      border-radius: var(--border-radius);
-      box-shadow: var(--box-shadow);
-      margin-bottom: 30px;
-    }
-    .alertes-box h3 {
-      color: var(--danger-color);
-      margin-bottom: 15px;
-    }
-    .alerte-item {
-      padding: 10px 15px;
-      margin: 8px 0;
-      border-radius: 8px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .alerte-item.bas {
-      background: #fff3cd;
-      border-left: 4px solid var(--warning-color);
-    }
-    .alerte-item.critique {
-      background: #f8d7da;
-      border-left: 4px solid var(--danger-color);
-    }
-  </style>
+<meta charset="UTF-8">
+<title>Tableau de bord - Smart Stock</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="../../assets/css/styles_connected.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
-  <header>
+<header>
     <nav class="navbar">
-      <div class="nav-left">
-        <a href="index.php" class="logo-link">
-          <img src="../../assets/images/logo_epicerie.png" alt="Logo Smart Stock" class="logo-navbar">
-        </a>
-        <a href="index.php" class="nav-link">Tableau de bord</a>
-        <a href="../stock/stock.php" class="nav-link">Stock</a>
-        <a href="../ventes/ventes.php" class="nav-link">Ventes</a>
-        <a href="../clients/clients.php" class="nav-link">Clients</a>
-        <a href="../commandes/commandes.php" class="nav-link">Commandes</a>
-        <a href="../stock/categories.php" class="nav-link">Catégories</a>
-        <?php if ($role === 'admin' || $role === 'responsable_approvisionnement'): ?>
-          <a href="../fournisseurs/fournisseurs.php" class="nav-link">Fournisseurs</a>
-        <?php endif; ?>
-        <?php 
-        // Vérifier l'accès à la trésorerie
-        $acces_tresorerie = false;
-        if ($role === 'admin' || $role === 'tresorier') {
-            $acces_tresorerie = true;
-        } elseif (function_exists('aPermission')) {
-            $acces_tresorerie = aPermission($conn, $id_utilisateur, 'acces_tresorerie');
-        } else {
-            include_once('../../includes/permissions_helper.php');
-            $acces_tresorerie = aPermission($conn, $id_utilisateur, 'acces_tresorerie');
-        }
-        if ($acces_tresorerie):
-        ?>
-          <a href="../tresorerie/tresorerie.php" class="nav-link">Trésorerie</a>
-        <?php endif; ?>
-        <?php if ($role === 'admin'): ?>
-          <?php
-          $table_exists = $conn->query("SHOW TABLES LIKE 'demandes_acces'");
-          $nb_demandes_attente = 0;
-          if ((is_object($table_exists) && method_exists($table_exists, 'num_rows') ? $table_exists->num_rows() : mysqli_num_rows($table_exists)) > 0) {
-              $check_demandes = $conn->query("SELECT COUNT(*) as total FROM demandes_acces WHERE statut = 'en_attente'");
-              $nb_demandes_attente = (is_object($check_demandes) && method_exists($check_demandes, 'fetch_assoc') ? $check_demandes->fetch_assoc() : mysqli_fetch_assoc($check_demandes))['total'] ?? 0;
-          }
-          ?>
-          <a href="../admin/demandes_acces.php" class="nav-link" style="position: relative;">
-            🔐 Demandes
-            <?php if ($nb_demandes_attente > 0): ?>
-              <span style="background: #dc3545; color: white; border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.75em; font-weight: bold; margin-left: 8px; position: absolute; top: -8px; right: -15px; box-shadow: 0 2px 8px rgba(220,53,69,0.4);">
-                <?= $nb_demandes_attente ?>
-              </span>
-            <?php endif; ?>
-          </a>
-          <a href="../admin/utilisateurs.php" class="nav-link">Utilisateurs</a>
-        <?php endif; ?>
-      </div>
-      <div style="display: flex; align-items: center; gap: 15px;">
-        <span style="color: #666; font-size: 0.9em;">
-          <?= displayRoleBadge($role) ?>
-        </span>
+        <div class="nav-left">
+            <a href="index.php" class="logo-link"><img src="../../assets/images/logo_epicerie.png" class="logo-navbar"></a>
+            <a href="index.php" class="nav-link">Tableau de bord</a>
+            <a href="../stock/stock.php" class="nav-link">Stock</a>
+            <a href="../ventes/ventes.php" class="nav-link">Ventes</a>
+            <a href="../clients/clients.php" class="nav-link">Clients</a>
+            <a href="../commandes/commandes.php" class="nav-link">Commandes</a>
+            <a href="../stock/categories.php" class="nav-link">Catégories</a>
+        </div>
         <a href="../auth/logout.php" class="logout">🚪 Déconnexion</a>
-      </div>
     </nav>
-  </header>
+</header>
 
-  <div class="main-container">
+<div class="main-container">
     <div class="content-wrapper">
-      <div style="text-align: center; margin-bottom: 30px;">
-        <h2 style="color: var(--primary-color); font-size: 2em; margin-bottom: 10px;">
-          Bienvenue, <?= htmlspecialchars($nom) ?> ! 👋
-        </h2>
-        <p style="color: #666; font-size: 0.9em; margin-top: 8px;">
-          <?= getRoleDescription($role) ?>
-        </p>
-        <?php if (in_array($role, ['vendeur', 'tresorier'])): ?>
-          <?php
-          $table_exists = $conn->query("SHOW TABLES LIKE 'demandes_acces'");
-          $nb_demandes = 0;
-          if ((is_object($table_exists) && method_exists($table_exists, 'num_rows') ? $table_exists->num_rows() : mysqli_num_rows($table_exists)) > 0) {
-              $check_demandes = $conn->query("SELECT COUNT(*) as total FROM demandes_acces WHERE id_utilisateur = $id_utilisateur AND statut = 'en_attente'");
-              $nb_demandes = (is_object($check_demandes) && method_exists($check_demandes, 'fetch_assoc') ? $check_demandes->fetch_assoc() : mysqli_fetch_assoc($check_demandes))['total'] ?? 0;
-          }
-          ?>
-          <?php if ($nb_demandes > 0): ?>
-            <div class="message warning" style="margin-top: 15px; max-width: 600px; margin-left: auto; margin-right: auto;">
-              🔔 Vous avez <?= $nb_demandes ?> demande<?= $nb_demandes > 1 ? 's' : '' ?> en attente. 
-              <a href="../admin/demandes_acces.php" style="color: var(--primary-color); font-weight: bold;">Voir mes demandes</a>
-            </div>
-          <?php else: ?>
-            <div style="margin-top: 15px;">
-              <a href="../admin/demandes_acces.php" class="btn btn-info" style="display: inline-block;">
-                🔐 Demander un accès supplémentaire
-              </a>
-            </div>
-          <?php endif; ?>
-        <?php elseif ($role === 'admin'): ?>
-          <?php
-          $table_exists = $conn->query("SHOW TABLES LIKE 'demandes_acces'");
-          $nb_demandes_attente = 0;
-          if ((is_object($table_exists) && method_exists($table_exists, 'num_rows') ? $table_exists->num_rows() : mysqli_num_rows($table_exists)) > 0) {
-              $check_demandes = $conn->query("SELECT COUNT(*) as total FROM demandes_acces WHERE statut = 'en_attente'");
-              $nb_demandes_attente = (is_object($check_demandes) && method_exists($check_demandes, 'fetch_assoc') ? $check_demandes->fetch_assoc() : mysqli_fetch_assoc($check_demandes))['total'] ?? 0;
-          }
-          ?>
-          <?php if ($nb_demandes_attente > 0): ?>
-            <div class="message error" style="margin-top: 15px; max-width: 600px; margin-left: auto; margin-right: auto;">
-              <strong>⚠️ <?= $nb_demandes_attente ?> demande<?= $nb_demandes_attente > 1 ? 's' : '' ?> en attente</strong><br>
-              Des vendeurs ont demandé des accès supplémentaires. Traitez leurs demandes depuis la page dédiée.
-              <a href="../admin/demandes_acces.php" class="btn" style="background: #dc3545; color: white; padding: 10px 20px; margin-top: 10px; display: inline-block; font-weight: bold;">
-                Voir les demandes
-              </a>
-            </div>
-          <?php endif; ?>
+        <h2>Bienvenue, <?= htmlspecialchars($nom) ?> 👋</h2>
+
+        <!-- STATISTIQUES -->
+        <div class="stats-grid">
+            <div class="stat-card"><h3>💰 Ventes du jour</h3><div class="value"><?= number_format($total_jour,2,',',' ') ?> €</div></div>
+            <div class="stat-card"><h3>📅 Ventes semaine</h3><div class="value"><?= number_format($total_semaine,2,',',' ') ?> €</div></div>
+            <div class="stat-card"><h3>📊 Ventes du mois</h3><div class="value"><?= number_format($total_mois,2,',',' ') ?> €</div></div>
+            <div class="stat-card"><h3>💵 Total ventes</h3><div class="value"><?= number_format($total_ventes,2,',',' ') ?> €</div></div>
+            <div class="stat-card"><h3>📦 Produits</h3><div class="value"><?= $total_produits ?></div></div>
+            <div class="stat-card"><h3>💎 Valeur du stock</h3><div class="value"><?= number_format($valeur_stock,2,',',' ') ?> €</div></div>
+            <div class="stat-card alertes"><h3>⚠️ Stock bas</h3><div class="value"><?= $nb_stock_bas ?></div></div>
+            <div class="stat-card alertes"><h3>🚨 Stock critique</h3><div class="value"><?= $nb_stock_critique ?></div></div>
+            <div class="stat-card"><h3>👥 Clients</h3><div class="value"><?= $total_clients ?></div></div>
+        </div>
+
+        <!-- ALERTES -->
+        <?php if (!empty($produits_alertes)): ?>
+        <div class="alertes-box">
+            <h3>⚠️ Alertes de stock</h3>
+            <?php foreach ($produits_alertes as $prod): ?>
+                <div class="alerte-item <?= $prod['quantite_stock'] <= 0 ? 'critique' : 'bas' ?>">
+                    <span><strong><?= htmlspecialchars($prod['nom']) ?></strong></span>
+                    <span>Stock: <?= $prod['quantite_stock'] ?></span>
+                </div>
+            <?php endforeach; ?>
+        </div>
         <?php endif; ?>
-      </div>
 
-      <div class="stats-grid">
-        <div class="stat-card">
-          <h3>💰 Ventes du jour</h3>
-          <div class="value"><?= number_format($total_jour, 2, ',', ' ') ?> €</div>
-        </div>
-        <div class="stat-card">
-          <h3>📅 Ventes de la semaine</h3>
-          <div class="value"><?= number_format($total_semaine, 2, ',', ' ') ?> €</div>
-        </div>
-        <div class="stat-card">
-          <h3>📊 Ventes du mois</h3>
-          <div class="value"><?= number_format($total_mois, 2, ',', ' ') ?> €</div>
-        </div>
-        <div class="stat-card">
-          <h3>💵 Total ventes</h3>
-          <div class="value"><?= number_format($total_ventes, 2, ',', ' ') ?> €</div>
-        </div>
-        <div class="stat-card">
-          <h3>📦 Total produits</h3>
-          <div class="value"><?= $total_produits ?></div>
-        </div>
-        <div class="stat-card">
-          <h3>💎 Valeur du stock</h3>
-          <div class="value"><?= number_format($valeur_stock, 2, ',', ' ') ?> €</div>
-        </div>
-        <div class="stat-card alertes">
-          <h3>⚠️ Stock bas</h3>
-          <p class="value"><?= $nb_stock_bas ?></p>
-        </div>
-        <div class="stat-card alertes">
-          <h3>🚨 Stock critique</h3>
-          <p class="value"><?= $nb_stock_critique ?></p>
-        </div>
-        <div class="stat-card">
-          <h3>👥 Total clients</h3>
-          <p class="value"><?= $total_clients ?></p>
-        </div>
-      </div>
-
-      <!-- Alertes de stock -->
-      <?php if ($nb_stock_bas > 0 || $nb_stock_critique > 0): ?>
-      <div class="alertes-box">
-        <h3>⚠️ Alertes de stock</h3>
-        <?php
-        // Réinitialiser le curseur pour réutiliser le résultat
-        if (is_object($produits_alertes) && method_exists($produits_alertes, 'data_seek')) {
-            $produits_alertes->data_seek(0);
-        } elseif (is_object($produits_alertes) && method_exists($produits_alertes, 'fetch_assoc')) {
-            // Pour PostgreSQL, on doit réexécuter la requête ou stocker les données
-            // Pour l'instant, on réexécute
-            $produits_alertes = $conn->query("SELECT id, nom, quantite_stock FROM produits WHERE quantite_stock < 10 ORDER BY quantite_stock ASC LIMIT 10");
-        }
-        while ($prod = (is_object($produits_alertes) && method_exists($produits_alertes, 'fetch_assoc') ? $produits_alertes->fetch_assoc() : mysqli_fetch_assoc($produits_alertes))):
-          $class = $prod['quantite_stock'] <= 0 ? 'critique' : 'bas';
-        ?>
-          <div class="alerte-item <?= $class ?>">
-            <span><strong><?= htmlspecialchars($prod['nom']) ?></strong></span>
-            <span>Stock: <?= $prod['quantite_stock'] ?></span>
-          </div>
-        <?php endwhile; ?>
-        <p style="margin-top: 15px;">
-          <a href="../stock/stock.php?stock=bas" class="btn">Voir tous les stocks bas</a>
-        </p>
-      </div>
-      <?php endif; ?>
-
-      <!-- Graphiques et données -->
-      <div class="charts-grid">
+        <!-- GRAPH -->
         <div class="chart-box">
-          <h3>📈 Ventes des 7 derniers jours</h3>
-          <canvas id="ventesChart"></canvas>
+            <h3>📈 Ventes 7 jours</h3>
+            <canvas id="ventesChart"></canvas>
         </div>
+
+        <script>
+            new Chart(document.getElementById('ventesChart'), {
+                type: 'line',
+                data: {
+                    labels: <?= json_encode($labels_graph) ?>,
+                    datasets: [{
+                        label: "Ventes (€)",
+                        data: <?= json_encode($data_graph) ?>,
+                        borderColor: "rgb(0,150,80)",
+                        backgroundColor: "rgba(0,150,80,0.2)",
+                        fill: true,
+                        tension: 0.4
+                    }]
+                }
+            });
+        </script>
+
+        <!-- VENTES RÉCENTES -->
         <div class="chart-box">
-          <h3>🏆 Top 5 produits vendus</h3>
-          <ul style="list-style: none; padding: 0;">
-            <?php
-            // Réinitialiser le curseur
-            if (is_object($top_produits) && method_exists($top_produits, 'data_seek')) {
-                $top_produits->data_seek(0);
-            } elseif (is_object($top_produits) && method_exists($top_produits, 'fetch_assoc')) {
-                // Réexécuter pour PostgreSQL
-                $top_produits = $conn->query("
-                    SELECT p.nom, SUM(dv.quantite) as total_vendu
-                    FROM details_vente dv
-                    JOIN produits p ON dv.id_produit = p.id
-                    GROUP BY p.id, p.nom
-                    ORDER BY total_vendu DESC
-                    LIMIT 5
-                ");
-            }
-            $rank = 1;
-            while ($prod = (is_object($top_produits) && method_exists($top_produits, 'fetch_assoc') ? $top_produits->fetch_assoc() : mysqli_fetch_assoc($top_produits))):
-            ?>
-              <li style="padding: 10px; margin: 5px 0; background: #f8f9fa; border-radius: 8px;">
-                <strong>#<?= $rank ?></strong> <?= htmlspecialchars($prod['nom']) ?> - 
-                <span style="color: #28a745; font-weight: bold;"><?= $prod['total_vendu'] ?> unités</span>
-              </li>
-            <?php
-              $rank++;
-            endwhile;
-            ?>
-          </ul>
+            <h3>📋 Ventes récentes</h3>
+            <table>
+                <thead><tr><th>Date</th><th>Client</th><th>Montant</th><th>Action</th></tr></thead>
+                <tbody>
+                <?php foreach ($ventes_recentes as $vente): ?>
+                <tr>
+                    <td><?= date('d/m/Y H:i', strtotime($vente['date_vente'])) ?></td>
+                    <td><?= htmlspecialchars($vente['client_nom'] ?? 'Client anonyme') ?></td>
+                    <td><?= number_format($vente['total'],2,',',' ') ?> €</td>
+                    <td><a href="../ventes/detailVente.php?id=<?= $vente['id'] ?>" class="btn btn-sm">Voir</a></td>
+                </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
         </div>
-      </div>
 
-      <!-- Ventes récentes -->
-      <div class="chart-box" style="margin-top: 20px;">
-        <h3>📋 Ventes récentes</h3>
-        <table>
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Client</th>
-              <th>Montant</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            <?php
-            // Réinitialiser le curseur
-            if (is_object($ventes_recentes) && method_exists($ventes_recentes, 'data_seek')) {
-                $ventes_recentes->data_seek(0);
-            } elseif (is_object($ventes_recentes) && method_exists($ventes_recentes, 'fetch_assoc')) {
-                // Réexécuter pour PostgreSQL
-                $ventes_recentes = $conn->query("
-                    SELECT v.id, v.date_vente, v.total, c.nom as client_nom
-                    FROM ventes v
-                    LEFT JOIN clients c ON v.id_client = c.id
-                    ORDER BY v.date_vente DESC
-                    LIMIT 5
-                ");
-            }
-            while ($vente = (is_object($ventes_recentes) && method_exists($ventes_recentes, 'fetch_assoc') ? $ventes_recentes->fetch_assoc() : mysqli_fetch_assoc($ventes_recentes))):
-            ?>
-              <tr>
-                <td><?= date('d/m/Y H:i', strtotime($vente['date_vente'])) ?></td>
-                <td><?= htmlspecialchars($vente['client_nom'] ?? 'Client anonyme') ?></td>
-                <td><?= number_format($vente['total'], 2, ',', ' ') ?> €</td>
-                <td><a href="../ventes/detailVente.php?id=<?= $vente['id'] ?>" class="btn btn-sm">Voir détails</a></td>
-              </tr>
-            <?php endwhile; ?>
-          </tbody>
-        </table>
-      </div>
-
-      <!-- Cartes d'accès rapide -->
-      <div class="stats-grid" style="margin-top: 30px;">
-        <a href="../stock/stock.php" class="stat-card" style="text-decoration: none; color: inherit; display: block; cursor: pointer; transition: var(--transition);">
-          <h3>📦 Gérer le stock</h3>
-          <p style="color: #666; margin-top: 10px; margin-bottom: 0;">Ajouter, modifier des produits</p>
-          <span style="display: inline-block; margin-top: 10px; color: var(--primary-color); font-weight: 600;">→ Accéder</span>
-        </a>
-        <a href="../ventes/ventes.php" class="stat-card" style="text-decoration: none; color: inherit; display: block; cursor: pointer; transition: var(--transition);">
-          <h3>💰 Nouvelle vente</h3>
-          <p style="color: #666; margin-top: 10px; margin-bottom: 0;">Enregistrer une vente</p>
-          <span style="display: inline-block; margin-top: 10px; color: var(--primary-color); font-weight: 600;">→ Accéder</span>
-        </a>
-        <a href="../clients/clients.php" class="stat-card" style="text-decoration: none; color: inherit; display: block; cursor: pointer; transition: var(--transition);">
-          <h3>👥 Gérer les clients</h3>
-          <p style="color: #666; margin-top: 10px; margin-bottom: 0;">Ajouter, modifier des clients</p>
-          <span style="display: inline-block; margin-top: 10px; color: var(--primary-color); font-weight: 600;">→ Accéder</span>
-        </a>
-        <?php if ($role === 'admin' || $role === 'responsable_approvisionnement'): ?>
-        <a href="../commandes/commandes.php" class="stat-card" style="text-decoration: none; color: inherit; display: block; cursor: pointer; transition: var(--transition);">
-          <h3>📋 Nouvelle commande</h3>
-          <p style="color: #666; margin-top: 10px; margin-bottom: 0;">Commander auprès d'un fournisseur</p>
-          <span style="display: inline-block; margin-top: 10px; color: var(--primary-color); font-weight: 600;">→ Accéder</span>
-        </a>
-        <a href="../fournisseurs/fournisseurs.php" class="stat-card" style="text-decoration: none; color: inherit; display: block; cursor: pointer; transition: var(--transition);">
-          <h3>🚚 Fournisseurs</h3>
-          <p style="color: #666; margin-top: 10px; margin-bottom: 0;">Gérer les fournisseurs</p>
-          <span style="display: inline-block; margin-top: 10px; color: var(--primary-color); font-weight: 600;">→ Accéder</span>
-        </a>
-        <?php endif; ?>
-        <a href="../stock/categories.php" class="stat-card" style="text-decoration: none; color: inherit; display: block; cursor: pointer; transition: var(--transition);">
-          <h3>🏷️ Catégories</h3>
-          <p style="color: #666; margin-top: 10px; margin-bottom: 0;">Gérer les catégories de produits</p>
-          <span style="display: inline-block; margin-top: 10px; color: var(--primary-color); font-weight: 600;">→ Accéder</span>
-        </a>
-        <?php if ($acces_tresorerie): ?>
-        <a href="../tresorerie/tresorerie.php" class="stat-card" style="text-decoration: none; color: inherit; display: block; cursor: pointer; transition: var(--transition); background: linear-gradient(135deg, #28a745, #20c997); color: white;">
-          <h3 style="color: white;">💵 Trésorerie</h3>
-          <p style="color: rgba(255,255,255,0.9); margin-top: 10px; margin-bottom: 0;">Gérer les finances et dépenses</p>
-          <span style="display: inline-block; margin-top: 10px; color: white; font-weight: 600;">→ Accéder</span>
-        </a>
-        <?php endif; ?>
-        <?php if ($role === 'admin'): ?>
-          <?php
-          $table_exists = $conn->query("SHOW TABLES LIKE 'demandes_acces'");
-          $nb_demandes_attente = 0;
-          if ((is_object($table_exists) && method_exists($table_exists, 'num_rows') ? $table_exists->num_rows() : mysqli_num_rows($table_exists)) > 0) {
-              $check_demandes = $conn->query("SELECT COUNT(*) as total FROM demandes_acces WHERE statut = 'en_attente'");
-              $nb_demandes_attente = (is_object($check_demandes) && method_exists($check_demandes, 'fetch_assoc') ? $check_demandes->fetch_assoc() : mysqli_fetch_assoc($check_demandes))['total'] ?? 0;
-          }
-          ?>
-          <div class="stat-card" style="background: linear-gradient(135deg, #dc3545, #c82333); color: white; cursor: pointer; transition: var(--transition);">
-            <h3 style="color: white;">🔐 Demandes d'accès</h3>
-            <p style="color: rgba(255,255,255,0.9); margin-top: 10px; margin-bottom: 0;">
-              <?= $nb_demandes_attente > 0 ? "<strong>$nb_demandes_attente demande(s) en attente</strong>" : "Traitez les demandes des vendeurs pour leur accorder des privilèges supplémentaires." ?>
-            </p>
-            <a href="../admin/demandes_acces.php" class="btn" style="background: white; color: #dc3545; font-weight: bold; padding: 12px 24px; box-shadow: 0 4px 15px rgba(255,255,255,0.3); margin-top: 15px; display: inline-block; text-decoration: none;">
-              Traiter les demandes
-            </a>
-          </div>
-        <?php endif; ?>
-      </div>
     </div>
-  </div>
-
-  <script>
-    // Graphique des ventes
-    const ctx = document.getElementById('ventesChart').getContext('2d');
-    new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: <?= json_encode($labels_graph) ?>,
-        datasets: [{
-          label: 'Ventes (€)',
-          data: <?= json_encode($data_graph) ?>,
-          borderColor: 'rgb(40, 167, 69)',
-          backgroundColor: 'rgba(40, 167, 69, 0.1)',
-          tension: 0.4,
-          fill: true
-        }]
-      },
-      options: {
-        responsive: true,
-        scales: {
-          y: {
-            beginAtZero: true
-          }
-        }
-      }
-    });
-  </script>
+</div>
 
 </body>
 </html>

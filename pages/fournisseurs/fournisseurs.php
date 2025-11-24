@@ -5,7 +5,7 @@ if (!isset($_SESSION['id_utilisateur'])) {
     exit();
 }
 
-include('../../config/db_conn.php');
+include('../../config/db_conn.php'); // $pdo = instance PDO
 include('../../includes/historique_helper.php');
 
 $role = $_SESSION['role'];
@@ -13,15 +13,15 @@ $id_utilisateur = $_SESSION['id_utilisateur'];
 $peut_modifier = in_array($role, ['admin', 'responsable_approvisionnement']);
 $message = "";
 
-// --- PAGINATION ---
+// Pagination
 $page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
 $per_page = 15;
 $offset = ($page - 1) * $per_page;
 
-// --- RECHERCHE ---
-$recherche = isset($_GET['recherche']) ? trim($_GET['recherche']) : '';
+// Recherche
+$recherche = isset($_GET['recherche']) ? trim($_GET['recherche']) : "";
 
-// --- AJOUT D'UN FOURNISSEUR ---
+// ========== AJOUT ==========
 if ($peut_modifier && isset($_POST['ajouter'])) {
     $nom = trim($_POST['nom']);
     $telephone = trim($_POST['telephone']);
@@ -29,157 +29,125 @@ if ($peut_modifier && isset($_POST['ajouter'])) {
     $adresse = trim($_POST['adresse']);
 
     if ($nom !== "") {
-        $stmt = $conn->prepare("INSERT INTO fournisseurs (nom, telephone, email, adresse) VALUES (?, ?, ?, ?)");
-        $stmt->bind_param("ssss", $nom, $telephone, $email, $adresse);
-        if ($stmt->execute()) {
-            $id_fournisseur = db_get_insert_id($conn);
-            enregistrer_historique($conn, $id_utilisateur, 'ajout', 'fournisseurs', $id_fournisseur, "Ajout du fournisseur: $nom");
+        $stmt = $pdo->prepare("INSERT INTO fournisseurs (nom, telephone, email, adresse) VALUES (?, ?, ?, ?)");
+        $ok = $stmt->execute([$nom, $telephone, $email, $adresse]);
+        if ($ok) {
+            $id_fournisseur = db_last_id($pdo);
+            enregistrer_historique($pdo, $id_utilisateur, 'ajout', 'fournisseurs', $id_fournisseur, "Ajout du fournisseur: $nom");
             $message = "✅ Fournisseur ajouté avec succès.";
         } else {
-            $message = "❌ Erreur lors de l'ajout : " . (isset($GLOBALS['is_postgresql']) && is_object($conn) && get_class($conn) === 'PostgreSQLConnection' ? $conn->error() : mysqli_error($conn));
+            $message = "❌ Erreur lors de l'ajout.";
         }
-        $stmt->close();
     } else {
         $message = "⚠️ Le nom du fournisseur est obligatoire.";
     }
 }
 
-// --- MODIFICATION D'UN FOURNISSEUR ---
+// ========== MODIFICATION ==========
 if ($peut_modifier && isset($_POST['modifier'])) {
     $id = intval($_POST['id']);
     $nom = trim($_POST['nom']);
     $telephone = trim($_POST['telephone']);
     $email = trim($_POST['email']);
     $adresse = trim($_POST['adresse']);
-    
-    $stmt = $conn->prepare("SELECT * FROM fournisseurs WHERE id = ?");
-    $stmt->bind_param("i", $id);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $ancien = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result));
-    $stmt->close();
-    
-    $stmt = $conn->prepare("UPDATE fournisseurs SET nom = ?, telephone = ?, email = ?, adresse = ? WHERE id = ?");
-    $stmt->bind_param("ssssi", $nom, $telephone, $email, $adresse, $id);
-    if ($stmt->execute()) {
-        enregistrer_historique($conn, $id_utilisateur, 'modification', 'fournisseurs', $id, "Modification du fournisseur: $nom", $ancien, ['nom' => $nom, 'telephone' => $telephone, 'email' => $email]);
+
+    $stmt = $pdo->prepare("SELECT * FROM fournisseurs WHERE id = ?");
+    $stmt->execute([$id]);
+    $ancien = $stmt->fetch();
+
+    $stmt = $pdo->prepare("UPDATE fournisseurs SET nom=?, telephone=?, email=?, adresse=? WHERE id=?");
+    $ok = $stmt->execute([$nom, $telephone, $email, $adresse, $id]);
+
+    if ($ok) {
+        enregistrer_historique($pdo, $id_utilisateur, 'modification', 'fournisseurs', $id, "Modification fournisseur: $nom", $ancien, [
+            'nom'=>$nom,'telephone'=>$telephone,'email'=>$email
+        ]);
         $message = "✅ Fournisseur modifié avec succès.";
     } else {
-        $message = "❌ Erreur : " . (isset($GLOBALS['is_postgresql']) && is_object($conn) && get_class($conn) === 'PostgreSQLConnection' ? $conn->error() : mysqli_error($conn));
+        $message = "❌ Erreur lors de la modification.";
     }
-    $stmt->close();
 }
 
-// --- SUPPRESSION D'UN FOURNISSEUR ---
+// ========== SUPPRESSION ==========
 if ($peut_modifier && isset($_GET['supprimer'])) {
     $id = intval($_GET['supprimer']);
-    
-    $stmt = $conn->prepare("SELECT * FROM fournisseurs WHERE id = ?");
-    $stmt->bind_param("i", $id);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $fournisseur = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result));
-    $stmt->close();
-    
-    $stmt = $conn->prepare("DELETE FROM fournisseurs WHERE id = ?");
-    $stmt->bind_param("i", $id);
-    $stmt->execute();
-    $stmt->close();
-    
-    enregistrer_historique($conn, $id_utilisateur, 'suppression', 'fournisseurs', $id, "Suppression du fournisseur: " . $fournisseur['nom'], $fournisseur, null);
+
+    $stmt = $pdo->prepare("SELECT * FROM fournisseurs WHERE id = ?");
+    $stmt->execute([$id]);
+    $fourn = $stmt->fetch();
+
+    $pdo->prepare("DELETE FROM fournisseurs WHERE id = ?")->execute([$id]);
+
+    enregistrer_historique($pdo, $id_utilisateur, 'suppression', 'fournisseurs', $id, "Suppression du fournisseur: ".$fourn['nom'], $fourn);
+
     header("Location: fournisseurs.php");
     exit();
 }
 
-// --- EXPORT CSV ---
+// ========== EXPORT CSV ==========
 if (isset($_GET['export']) && $_GET['export'] == 'csv') {
-    header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename=fournisseurs_' . date('Y-m-d') . '.csv');
-    
-    $output = fopen('php://output', 'w');
-    fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
-    
-    fputcsv($output, ['ID', 'Nom', 'Téléphone', 'Email', 'Adresse'], ';');
-    
-    $query = "SELECT * FROM fournisseurs ORDER BY nom ASC";
-    $result = $conn->query($query);
-    
-    while ($row = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result))) {
-        fputcsv($output, [
-            $row['id'],
-            $row['nom'],
-            $row['telephone'],
-            $row['email'],
-            $row['adresse']
-        ], ';');
+    header("Content-Type: text/csv; charset=utf-8");
+    header("Content-Disposition: attachment; filename=fournisseurs_".date("Y-m-d").".csv");
+
+    $out = fopen("php://output", "w");
+    fprintf($out, chr(0xEF).chr(0xBB).chr(0xBF));
+
+    fputcsv($out, ['ID','Nom','Téléphone','Email','Adresse'], ';');
+
+    $rows = $pdo->query("SELECT * FROM fournisseurs ORDER BY nom ASC")->fetchAll();
+    foreach ($rows as $r) {
+        fputcsv($out, [$r['id'],$r['nom'],$r['telephone'],$r['email'],$r['adresse']], ';');
     }
-    
-    fclose($output);
     exit();
 }
 
-// --- CONSTRUCTION DE LA REQUÊTE ---
-$where_clause = "";
+// ========== LISTE AVEC RECHERCHE ==========
+
+$where = "";
 $params = [];
-$types = "";
 
-if (!empty($recherche)) {
-    $where_clause = "WHERE (nom LIKE ? OR telephone LIKE ? OR email LIKE ?)";
-    $recherche_param = "%$recherche%";
-    $params = [$recherche_param, $recherche_param, $recherche_param];
-    $types = "sss";
+if ($recherche !== "") {
+    $where = "WHERE (nom ILIKE ? OR telephone ILIKE ? OR email ILIKE ?)";
+    $params = ["%$recherche%","%$recherche%","%$recherche%"];
 }
 
-// Compte total
-$count_query = "SELECT COUNT(*) as total FROM fournisseurs $where_clause";
-if (!empty($params)) {
-    $stmt = $conn->prepare($count_query);
-    $stmt->bind_param($types, ...$params);
-    $stmt->execute();
-    $count_result = $stmt->get_result();
-    $total_rows = (is_object($count_result) && method_exists($count_result, 'fetch_assoc') ? $count_result->fetch_assoc() : mysqli_fetch_assoc($count_result))['total'];
-    $stmt->close();
-} else {
-    $count_result = $conn->query($count_query);
-    $total_rows = (is_object($count_result) && method_exists($count_result, 'fetch_assoc') ? $count_result->fetch_assoc() : mysqli_fetch_assoc($count_result))['total'];
-}
+// Compter total
+$stmt = $pdo->prepare("SELECT COUNT(*) FROM fournisseurs $where");
+$stmt->execute($params);
+$total_rows = $stmt->fetchColumn();
 $total_pages = ceil($total_rows / $per_page);
 
 // Requête principale
-$query = "SELECT f.*, COUNT(DISTINCT a.id) as nb_commandes, COALESCE(SUM(a.montant_total), 0) as total_commandes 
-          FROM fournisseurs f 
-          LEFT JOIN achats a ON f.id = a.id_fournisseur 
-          $where_clause 
-          GROUP BY f.id 
-          ORDER BY f.nom ASC 
-          LIMIT ? OFFSET ?";
-$params[] = $per_page;
-$params[] = $offset;
-$types .= "ii";
+$sql = "
+SELECT f.*,
+       COUNT(a.id) AS nb_commandes,
+       COALESCE(SUM(a.montant_total), 0) AS total_commandes
+FROM fournisseurs f
+LEFT JOIN achats a ON a.id_fournisseur = f.id
+$where
+GROUP BY f.id
+ORDER BY f.nom ASC
+LIMIT $per_page OFFSET $offset
+";
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
+$fournisseurs = $stmt->fetchAll();
 
-$stmt = $conn->prepare($query);
-$stmt->bind_param($types, ...$params);
-$stmt->execute();
-$result = $stmt->get_result();
-
-// Fournisseur à modifier
+// Edition
 $fournisseur_edit = null;
 if (isset($_GET['edit']) && $peut_modifier) {
-    $id_edit = intval($_GET['edit']);
-    $stmt = $conn->prepare("SELECT * FROM fournisseurs WHERE id = ?");
-    $stmt->bind_param("i", $id_edit);
-    $stmt->execute();
-    $result_edit = $stmt->get_result();
-    $fournisseur_edit = (is_object($result_edit) && method_exists($result_edit, 'fetch_assoc') ? $result_edit->fetch_assoc() : mysqli_fetch_assoc($result_edit));
-    $stmt->close();
+    $id = intval($_GET['edit']);
+    $stmt = $pdo->prepare("SELECT * FROM fournisseurs WHERE id = ?");
+    $stmt->execute([$id]);
+    $fournisseur_edit = $stmt->fetch();
 }
 ?>
 <!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<title>🚚 Gestion des fournisseurs - Smart Stock</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>🚚 Fournisseurs</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="../../assets/css/styles_connected.css">
 </head>
 <body>
@@ -187,150 +155,117 @@ if (isset($_GET['edit']) && $peut_modifier) {
 <header>
     <nav class="navbar">
         <div class="nav-left">
-            <a href="../dashboard/index.php" class="logo-link">
-                <img src="../../assets/images/logo_epicerie.png" alt="Logo" class="logo-navbar">
-            </a>
-            <a href="../dashboard/index.php" class="nav-link">Tableau de bord</a>
+            <a href="../dashboard/index.php"><img src="../../assets/images/logo_epicerie.png" class="logo-navbar"></a>
+            <a href="../dashboard/index.php" class="nav-link">Dashboard</a>
             <a href="../stock/stock.php" class="nav-link">Stock</a>
             <a href="../ventes/ventes.php" class="nav-link">Ventes</a>
             <a href="../clients/clients.php" class="nav-link">Clients</a>
             <a href="fournisseurs.php" class="nav-link">Fournisseurs</a>
             <a href="../commandes/commandes.php" class="nav-link">Commandes</a>
-            <a href="../stock/categories.php" class="nav-link">Catégories</a>
         </div>
         <a href="../auth/logout.php" class="logout">🚪 Déconnexion</a>
     </nav>
 </header>
 
-<div class="main-container">
-    <div class="content-wrapper">
-    <h1>🚚 Gestion des fournisseurs</h1>
+<div class="main-container"><div class="content-wrapper">
 
-        <?php if ($message): ?>
-            <div class="message <?= strpos($message, '✅') !== false ? 'success' : (strpos($message, '⚠️') !== false ? 'warning' : 'error') ?>">
-                <?= $message ?>
-            </div>
-        <?php endif; ?>
+<h1>🚚 Gestion des fournisseurs</h1>
 
-    <!-- Recherche -->
-    <div class="filters">
-        <form method="GET" style="display: flex; gap: 10px; width: 100%;">
-            <input type="text" name="recherche" placeholder="🔍 Rechercher un fournisseur..." value="<?= htmlspecialchars($recherche) ?>" style="flex: 1;">
-            <button type="submit" class="btn">Filtrer</button>
-            <a href="fournisseurs.php" class="btn btn-secondary">Réinitialiser</a>
-        </form>
+<?php if ($message): ?>
+<div class="message"><?= $message ?></div>
+<?php endif; ?>
+
+<!-- Recherche -->
+<form method="GET" style="display:flex; gap:10px;">
+    <input type="text" name="recherche" placeholder="Rechercher..." value="<?= htmlspecialchars($recherche) ?>" style="flex:1;">
+    <button class="btn">Filtrer</button>
+    <a href="fournisseurs.php" class="btn btn-secondary">Réinitialiser</a>
+</form>
+
+<a href="?export=csv" class="btn">📥 Export CSV</a>
+
+<?php if ($peut_modifier): ?>
+<h3><?= $fournisseur_edit ? "✏️ Modifier un fournisseur" : "➕ Ajouter un fournisseur" ?></h3>
+
+<form method="POST">
+    <?php if ($fournisseur_edit): ?>
+        <input type="hidden" name="id" value="<?= $fournisseur_edit['id'] ?>">
+    <?php endif; ?>
+
+    <div class="form-group">
+        <label>Nom :</label>
+        <input type="text" name="nom" required value="<?= $fournisseur_edit ? htmlspecialchars($fournisseur_edit['nom']) : '' ?>">
     </div>
 
-    <!-- Export -->
-    <div class="export-buttons">
-        <a href="?export=csv">📥 Exporter en CSV</a>
+    <div class="form-group">
+        <label>Téléphone :</label>
+        <input type="text" name="telephone" value="<?= $fournisseur_edit ? htmlspecialchars($fournisseur_edit['telephone']) : '' ?>">
     </div>
+
+    <div class="form-group">
+        <label>Email :</label>
+        <input type="email" name="email" value="<?= $fournisseur_edit ? htmlspecialchars($fournisseur_edit['email']) : '' ?>">
+    </div>
+
+    <div class="form-group">
+        <label>Adresse :</label>
+        <textarea name="adresse"><?= $fournisseur_edit ? htmlspecialchars($fournisseur_edit['adresse']) : '' ?></textarea>
+    </div>
+
+    <button name="<?= $fournisseur_edit ? 'modifier' : 'ajouter' ?>" class="btn">
+        <?= $fournisseur_edit ? "✔ Modifier" : "➕ Ajouter" ?>
+    </button>
+
+    <?php if ($fournisseur_edit): ?>
+    <a href="fournisseurs.php" class="btn btn-secondary">Annuler</a>
+    <?php endif; ?>
+</form>
+<?php endif; ?>
+
+<h3>📋 Liste des fournisseurs (<?= $total_rows ?>)</h3>
+
+<table>
+<thead>
+<tr>
+    <th>ID</th><th>Nom</th><th>Téléphone</th><th>Email</th><th>Adresse</th>
+    <th>Commandes</th><th>Total (€)</th>
+    <?php if ($peut_modifier): ?><th>Actions</th><?php endif; ?>
+</tr>
+</thead>
+<tbody>
+
+<?php foreach ($fournisseurs as $f): ?>
+<tr>
+    <td><?= $f['id'] ?></td>
+    <td><?= htmlspecialchars($f['nom']) ?></td>
+    <td><?= htmlspecialchars($f['telephone']) ?></td>
+    <td><?= htmlspecialchars($f['email']) ?></td>
+    <td><?= htmlspecialchars($f['adresse']) ?></td>
+    <td><?= $f['nb_commandes'] ?></td>
+    <td><?= number_format($f['total_commandes'],2,',',' ') ?> €</td>
 
     <?php if ($peut_modifier): ?>
-        <h3><?= $fournisseur_edit ? '✏️ Modifier un fournisseur' : '➕ Ajouter un fournisseur' ?></h3>
-        <form method="POST">
-            <?php if ($fournisseur_edit): ?>
-                <input type="hidden" name="id" value="<?= $fournisseur_edit['id'] ?>">
-            <?php endif; ?>
-            <div class="form-group">
-                <label>Nom du fournisseur :</label>
-                <input type="text" name="nom" placeholder="Nom du fournisseur" value="<?= $fournisseur_edit ? htmlspecialchars($fournisseur_edit['nom']) : '' ?>" required>
-            </div>
-            <div class="form-group">
-                <label>Téléphone :</label>
-                <input type="text" name="telephone" placeholder="Téléphone" value="<?= $fournisseur_edit ? htmlspecialchars($fournisseur_edit['telephone']) : '' ?>">
-            </div>
-            <div class="form-group">
-                <label>Email :</label>
-                <input type="email" name="email" placeholder="Email" value="<?= $fournisseur_edit ? htmlspecialchars($fournisseur_edit['email']) : '' ?>">
-            </div>
-            <div class="form-group">
-                <label>Adresse :</label>
-                <textarea name="adresse" placeholder="Adresse"><?= $fournisseur_edit ? htmlspecialchars($fournisseur_edit['adresse']) : '' ?></textarea>
-            </div>
-            <button type="submit" name="<?= $fournisseur_edit ? 'modifier' : 'ajouter' ?>" class="btn">
-                <?= $fournisseur_edit ? '✏️ Modifier' : '➕ Ajouter' ?>
-            </button>
-            <?php if ($fournisseur_edit): ?>
-                <a href="fournisseurs.php" class="btn btn-secondary">Annuler</a>
-            <?php endif; ?>
-        </form>
-    <?php else: ?>
-            <div class="message warning">
-                ℹ️ Vous n'avez pas les droits pour ajouter ou supprimer des fournisseurs.<br>
-                Seuls les <strong>admins</strong> et <strong>responsables approvisionnement</strong> peuvent le faire.
-            </div>
+    <td>
+        <a href="?edit=<?= $f['id'] ?>" class="btn btn-info btn-sm">✏️</a>
+        <a href="?supprimer=<?= $f['id'] ?>" class="btn btn-danger btn-sm" onclick="return confirm('Supprimer ?')">🗑️</a>
+    </td>
     <?php endif; ?>
+</tr>
+<?php endforeach; ?>
 
-        <h3>📋 Liste des fournisseurs (<?= $total_rows ?> fournisseur<?= $total_rows > 1 ? 's' : '' ?>)</h3>
-    <table>
-            <thead>
-        <tr>
-            <th>ID</th>
-            <th>Nom</th>
-            <th>Téléphone</th>
-            <th>Email</th>
-            <th>Adresse</th>
-                    <th>Commandes</th>
-                    <th>Total (€)</th>
-                    <?php if ($peut_modifier): ?><th>Actions</th><?php endif; ?>
-        </tr>
-            </thead>
-            <tbody>
-                <?php 
-                if ((is_object($result) && method_exists($result, 'num_rows') ? $result->num_rows() : mysqli_num_rows($result)) > 0):
-                    while ($row = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result))): 
-                ?>
-        <tr>
-            <td><?= $row['id'] ?></td>
-            <td><?= htmlspecialchars($row['nom']) ?></td>
-            <td><?= htmlspecialchars($row['telephone']) ?></td>
-            <td><?= htmlspecialchars($row['email']) ?></td>
-            <td><?= htmlspecialchars($row['adresse']) ?></td>
-                    <td><?= $row['nb_commandes'] ?></td>
-                    <td style="font-weight: bold; color: var(--primary-color);"><?= number_format($row['total_commandes'], 2, ',', ' ') ?> €</td>
-            <?php if ($peut_modifier): ?>
-                        <td>
-                            <a href="?edit=<?= $row['id'] ?>&<?= http_build_query(array_merge($_GET, ['edit' => $row['id']])) ?>" class="btn btn-info btn-sm">✏️ Modifier</a>
-                            <a href="?supprimer=<?= $row['id'] ?>" class="btn btn-danger btn-sm" onclick="return confirm('Êtes-vous sûr ?')">🗑️ Supprimer</a>
-                        </td>
-            <?php endif; ?>
-        </tr>
-                <?php 
-                    endwhile;
-                else:
-                ?>
-                <tr>
-                    <td colspan="<?= $peut_modifier ? '8' : '7' ?>" style="text-align: center; padding: 20px;">
-                        Aucun fournisseur trouvé.
-                    </td>
-                </tr>
-                <?php endif; ?>
-            </tbody>
-    </table>
+</tbody>
+</table>
 
-    <!-- Pagination -->
-    <?php if ($total_pages > 1): ?>
-    <div class="pagination">
-        <?php if ($page > 1): ?>
-            <a href="?page=<?= $page - 1 ?>&<?= http_build_query(array_merge($_GET, ['page' => $page - 1])) ?>">« Précédent</a>
-        <?php endif; ?>
-        
-        <?php for ($i = max(1, $page - 2); $i <= min($total_pages, $page + 2); $i++): ?>
-            <?php if ($i == $page): ?>
-                <span class="active"><?= $i ?></span>
-            <?php else: ?>
-                <a href="?page=<?= $i ?>&<?= http_build_query(array_merge($_GET, ['page' => $i])) ?>"><?= $i ?></a>
-            <?php endif; ?>
-        <?php endfor; ?>
-        
-        <?php if ($page < $total_pages): ?>
-            <a href="?page=<?= $page + 1 ?>&<?= http_build_query(array_merge($_GET, ['page' => $page + 1])) ?>">Suivant »</a>
-        <?php endif; ?>
-    </div>
-    <?php endif; ?>
-    </div>
+<!-- PAGINATION -->
+<?php if ($total_pages > 1): ?>
+<div class="pagination">
+<?php for ($i=1;$i<=$total_pages;$i++): ?>
+    <a class="<?= $i==$page?'active':'' ?>" href="?page=<?= $i ?>&<?= http_build_query($_GET) ?>"><?= $i ?></a>
+<?php endfor; ?>
 </div>
+<?php endif; ?>
+
+</div></div>
 
 </body>
 </html>

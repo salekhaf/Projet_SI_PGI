@@ -4,7 +4,8 @@ if (!isset($_SESSION['id_utilisateur'])) {
     header("Location: ../auth/auth.php");
     exit();
 }
-include('../../config/db_conn.php');
+
+require_once('../../config/db_conn.php'); // fournit $pdo
 
 if (!isset($_GET['id'])) {
     header("Location: ventes.php");
@@ -13,32 +14,42 @@ if (!isset($_GET['id'])) {
 
 $id_vente = intval($_GET['id']);
 
-// --- Récupérer la vente principale ---
-$sql_vente = "SELECT v.id, v.date_vente, v.total, 
-                     c.nom AS client, 
-                     u.nom AS vendeur
-              FROM ventes v
-              LEFT JOIN clients c ON v.id_client = c.id
-              LEFT JOIN utilisateurs u ON v.id_utilisateur = u.id
-              WHERE v.id = $id_vente";
-$vente = $conn->query($sql_vente);
-if ((is_object($vente) && method_exists($vente, 'num_rows') ? $vente->num_rows() : mysqli_num_rows($vente)) == 0) {
+// ====== RÉCUPÉRER LA VENTE PRINCIPALE ======
+$sql_vente = "
+    SELECT v.id, v.date_vente, v.total,
+           c.nom AS client,
+           u.nom AS vendeur
+    FROM ventes v
+    LEFT JOIN clients c ON v.id_client = c.id
+    LEFT JOIN utilisateurs u ON v.id_utilisateur = u.id
+    WHERE v.id = :id
+";
+
+$stmt = $pdo->prepare($sql_vente);
+$stmt->execute([':id' => $id_vente]);
+$vente = $stmt->fetch(PDO::FETCH_ASSOC);
+
+if (!$vente) {
     die("Vente introuvable !");
 }
-$vente = (is_object($vente) && method_exists($vente, 'fetch_assoc') ? $vente->fetch_assoc() : mysqli_fetch_assoc($vente));
 
-// --- Récupérer les détails ---
-$sql_details = "SELECT d.quantite, d.prix_unitaire, p.nom 
-                FROM details_vente d
-                JOIN produits p ON d.id_produit = p.id
-                WHERE d.id_vente = $id_vente";
-$details = $conn->query($sql_details);
+// ====== RÉCUPÉRER LES DÉTAILS ======
+$sql_details = "
+    SELECT d.quantite, d.prix_unitaire, p.nom
+    FROM details_vente d
+    JOIN produits p ON d.id_produit = p.id
+    WHERE d.id_vente = :id
+";
+
+$stmt = $pdo->prepare($sql_details);
+$stmt->execute([':id' => $id_vente]);
+$details = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<title>🧾 Détails de la vente #<?= $vente['id'] ?> - Smart Stock</title>
+<title>🧾 Détails de la vente #<?= htmlspecialchars($vente['id']) ?> - Smart Stock</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="../../assets/css/styles_connected.css">
 </head>
@@ -57,72 +68,82 @@ $details = $conn->query($sql_details);
             <a href="../commandes/commandes.php" class="nav-link">Commandes</a>
             <a href="../stock/categories.php" class="nav-link">Catégories</a>
         </div>
+
         <a href="../auth/logout.php" class="logout">🚪 Déconnexion</a>
     </nav>
 </header>
 
 <div class="main-container">
-    <div class="content-wrapper">
-    <h1>🧾 Détails de la vente n°<?= $vente['id'] ?></h1>
-        
-        <p style="margin-bottom: 25px;">
-            <a href="ventes.php" class="btn btn-secondary">⬅️ Retour aux ventes</a>
-        </p>
+<div class="content-wrapper">
 
-    <h3>Informations générales</h3>
-    <table>
-            <thead>
-                <tr>
-                    <th>Client</th>
-                    <th>Vendeur</th>
-                    <th>Date</th>
-                    <th>Total</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td><?= htmlspecialchars($vente['client'] ?? "Non spécifié") ?></td>
-                    <td><?= htmlspecialchars($vente['vendeur']) ?></td>
-                    <td><?= date('d/m/Y H:i', strtotime($vente['date_vente'])) ?></td>
-                    <td style="font-weight: bold; color: var(--success-color); font-size: 1.1em;">
-                        <?= number_format($vente['total'], 2, ',', ' ') ?> €
-                    </td>
-                </tr>
-            </tbody>
-    </table>
+<h1>🧾 Détails de la vente n°<?= htmlspecialchars($vente['id']) ?></h1>
 
-        <h3 style="margin-top: 30px;">Produits vendus</h3>
-    <table>
-            <thead>
-                <tr>
-                    <th>Produit</th>
-                    <th>Quantité</th>
-                    <th>Prix unitaire (€)</th>
-                    <th>Sous-total (€)</th>
-                </tr>
-            </thead>
-            <tbody>
-        <?php $total_calcule = 0; ?>
-        <?php while ($d = (is_object($details) && method_exists($details, 'fetch_assoc') ? $details->fetch_assoc() : mysqli_fetch_assoc($details))): 
-            $sous_total = $d['quantite'] * $d['prix_unitaire'];
-            $total_calcule += $sous_total;
-        ?>
+<p style="margin-bottom: 25px;">
+    <a href="ventes.php" class="btn btn-secondary">⬅️ Retour aux ventes</a>
+</p>
+
+<h3>Informations générales</h3>
+
+<table>
+    <thead>
         <tr>
-            <td><?= htmlspecialchars($d['nom']) ?></td>
-            <td><?= $d['quantite'] ?></td>
-            <td><?= number_format($d['prix_unitaire'], 2, ',', ' ') ?></td>
-                    <td style="font-weight: bold; color: var(--primary-color);">
-                        <?= number_format($sous_total, 2, ',', ' ') ?> €
-                    </td>
+            <th>Client</th>
+            <th>Vendeur</th>
+            <th>Date</th>
+            <th>Total</th>
         </tr>
-        <?php endwhile; ?>
-            </tbody>
-    </table>
+    </thead>
+    <tbody>
+        <tr>
+            <td><?= htmlspecialchars($vente['client'] ?? "Non spécifié") ?></td>
+            <td><?= htmlspecialchars($vente['vendeur']) ?></td>
+            <td><?= date('d/m/Y H:i', strtotime($vente['date_vente'])) ?></td>
+            <td style="font-weight: bold; color: var(--success-color); font-size: 1.1em;">
+                <?= number_format($vente['total'], 2, ',', ' ') ?> €
+            </td>
+        </tr>
+    </tbody>
+</table>
 
-        <div style="text-align: right; font-weight: bold; font-size: 1.3em; margin-top: 20px; color: var(--success-color);">
-            Total calculé : <strong><?= number_format($total_calcule, 2, ',', ' ') ?> €</strong>
-        </div>
-    </div>
+<h3 style="margin-top: 30px;">Produits vendus</h3>
+
+<table>
+    <thead>
+        <tr>
+            <th>Produit</th>
+            <th>Quantité</th>
+            <th>Prix unitaire (€)</th>
+            <th>Sous-total (€)</th>
+        </tr>
+    </thead>
+    <tbody>
+
+<?php 
+$total_calcule = 0;
+
+foreach ($details as $d):
+    $sous_total = $d['quantite'] * $d['prix_unitaire'];
+    $total_calcule += $sous_total;
+?>
+<tr>
+    <td><?= htmlspecialchars($d['nom']) ?></td>
+    <td><?= $d['quantite'] ?></td>
+    <td><?= number_format($d['prix_unitaire'], 2, ',', ' ') ?></td>
+    <td style="font-weight: bold; color: var(--primary-color);">
+        <?= number_format($sous_total, 2, ',', ' ') ?> €
+    </td>
+</tr>
+
+<?php endforeach; ?>
+
+    </tbody>
+</table>
+
+<div style="text-align: right; font-weight: bold; font-size: 1.3em; margin-top: 20px; color: var(--success-color);">
+    Total calculé : <strong><?= number_format($total_calcule, 2, ',', ' ') ?> €</strong>
+</div>
+
+</div>
 </div>
 </body>
 </html>

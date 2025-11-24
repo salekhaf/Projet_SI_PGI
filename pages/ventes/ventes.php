@@ -5,81 +5,141 @@ if (!isset($_SESSION['id_utilisateur'])) {
     exit();
 }
 
-include('../../config/db_conn.php');
+require_once('../../config/db_conn.php'); // fournit $pdo
 $message = "";
 
-// --- AJOUTER UNE VENTE ---
+// ======================================
+// 🔵 AJOUT D’UNE VENTE
+// ======================================
 if (isset($_POST['ajouter'])) {
-    $id_client = $_POST['id_client'] !== "" ? intval($_POST['id_client']) : "NULL";
+
+    $id_client = $_POST['id_client'] !== "" ? intval($_POST['id_client']) : null;
     $id_utilisateur = $_SESSION['id_utilisateur'];
+
     $produits = $_POST['produit_id'];
     $quantites = $_POST['quantite'];
     $totaux = $_POST['prix_total'];
+
     $total_general = 0;
 
-    // Validation du stock côté serveur
+    // ----- Vérification du stock -----
     $stock_ok = true;
     $erreurs_stock = [];
 
     for ($i = 0; $i < count($produits); $i++) {
+
         $id_produit = intval($produits[$i]);
         $qte = intval($quantites[$i]);
+
         if ($id_produit > 0 && $qte > 0) {
-            $req = $conn->query("SELECT nom, quantite_stock FROM produits WHERE id = $id_produit");
-            $p = (is_object($req) && method_exists($req, 'fetch_assoc') ? $req->fetch_assoc() : mysqli_fetch_assoc($req));
+            $stmt = $pdo->prepare("SELECT nom, quantite_stock FROM produits WHERE id = :id");
+            $stmt->execute([':id' => $id_produit]);
+            $p = $stmt->fetch();
+
             if ($qte > $p['quantite_stock']) {
                 $stock_ok = false;
-                $erreurs_stock[] = "❌ Le produit <strong>" . htmlspecialchars($p['nom']) . "</strong> n’a que <strong>" . $p['quantite_stock'] . "</strong> unités en stock.";
+                $erreurs_stock[] = "❌ Le produit <strong>" . htmlspecialchars($p['nom']) . "</strong> n’a que <strong>" . $p['quantite_stock'] . "</strong> en stock.";
             }
         }
     }
 
     if (!$stock_ok) {
         $message = implode("<br>", $erreurs_stock);
+
     } else {
-        foreach ($totaux as $t) $total_general += floatval($t);
 
-        $sql_vente = "INSERT INTO ventes (id_client, id_utilisateur, total) VALUES ($id_client, $id_utilisateur, $total_general)";
-        if ($conn->query($sql_vente)) {
-            $id_vente = db_get_insert_id($conn);
-
-            for ($i = 0; $i < count($produits); $i++) {
-                $id_produit = intval($produits[$i]);
-                $qte = intval($quantites[$i]);
-                if ($qte > 0 && $id_produit > 0) {
-                    $req_p = $conn->query("SELECT prix_vente, quantite_stock FROM produits WHERE id = $id_produit");
-                    $p = (is_object($req_p) && method_exists($req_p, 'fetch_assoc') ? $req_p->fetch_assoc() : mysqli_fetch_assoc($req_p));
-                    $prix_unitaire = $p['prix_vente'];
-                    $nouveau_stock = $p['quantite_stock'] - $qte;
-
-                    $conn->query("INSERT INTO details_vente (id_vente, id_produit, quantite, prix_unitaire)
-                                         VALUES ($id_vente, $id_produit, $qte, $prix_unitaire)");
-                    $conn->query("UPDATE produits SET quantite_stock = $nouveau_stock WHERE id = $id_produit");
-                }
-            }
-            $message = "✅ Vente enregistrée avec succès.";
-        } else {
-            $message = "❌ Erreur : " . (isset($GLOBALS['is_postgresql']) && is_object($conn) && get_class($conn) === 'PostgreSQLConnection' ? $conn->error() : mysqli_error($conn));
+        // Calcul du total général
+        foreach ($totaux as $t) {
+            $total_general += floatval($t);
         }
+
+        // ----- Création de la vente -----
+        $stmt = $pdo->prepare("
+            INSERT INTO ventes (id_client, id_utilisateur, total)
+            VALUES (:client, :user, :total)
+        ");
+
+        $stmt->execute([
+            ':client' => $id_client,
+            ':user'   => $id_utilisateur,
+            ':total'  => $total_general
+        ]);
+
+        $id_vente = db_last_id($pdo, 'ventes');
+
+        // ----- Ajouter les détails + mettre à jour le stock -----
+        for ($i = 0; $i < count($produits); $i++) {
+
+            $id_produit = intval($produits[$i]);
+            $qte = intval($quantites[$i]);
+
+            if ($id_produit > 0 && $qte > 0) {
+
+                // Récup prix + stock
+                $stmt = $pdo->prepare("SELECT prix_vente, quantite_stock FROM produits WHERE id = :id");
+                $stmt->execute([':id' => $id_produit]);
+                $p = $stmt->fetch();
+
+                $prix_unitaire = $p['prix_vente'];
+                $nouveau_stock = $p['quantite_stock'] - $qte;
+
+                // Insert détail
+                $stmt = $pdo->prepare("
+                    INSERT INTO details_vente (id_vente, id_produit, quantite, prix_unitaire)
+                    VALUES (:v, :p, :q, :prix)
+                ");
+                $stmt->execute([
+                    ':v' => $id_vente,
+                    ':p' => $id_produit,
+                    ':q' => $qte,
+                    ':prix' => $prix_unitaire
+                ]);
+
+                // Mise à jour du stock
+                $stmt = $pdo->prepare("
+                    UPDATE produits SET quantite_stock = :s WHERE id = :id
+                ");
+                $stmt->execute([
+                    ':s' => $nouveau_stock,
+                    ':id' => $id_produit
+                ]);
+            }
+        }
+
+        $message = "✅ Vente enregistrée avec succès.";
     }
 }
 
-// --- SUPPRESSION D’UNE VENTE ---
+// ======================================
+// 🔴 SUPPRESSION
+// ======================================
 if (isset($_GET['supprimer'])) {
     $id = intval($_GET['supprimer']);
-    $conn->query("DELETE FROM ventes WHERE id = $id");
+    $pdo->prepare("DELETE FROM ventes WHERE id = :id")->execute([':id' => $id]);
     header("Location: ventes.php");
     exit();
 }
 
-// --- RÉCUPÉRATION DES DONNÉES ---
-$ventes = $conn->query("SELECT v.id, v.total, v.date_vente, c.nom AS client, u.nom AS vendeur
-                               FROM ventes v
-                               LEFT JOIN clients c ON v.id_client = c.id
-                               LEFT JOIN utilisateurs u ON v.id_utilisateur = u.id
-                               ORDER BY v.id DESC");
-$clients = $conn->query("SELECT id, nom FROM clients ORDER BY nom ASC");
-$produits = $conn->query("SELECT id, nom, prix_vente, quantite_stock FROM produits ORDER BY nom ASC");
+// ======================================
+// 📥 RÉCUPÉRER LES DONNÉES
+// ======================================
+$ventes = $pdo->query("
+    SELECT v.id, v.total, v.date_vente,
+           c.nom AS client,
+           u.nom AS vendeur
+    FROM ventes v
+    LEFT JOIN clients c ON v.id_client = c.id
+    LEFT JOIN utilisateurs u ON v.id_utilisateur = u.id
+    ORDER BY v.id DESC
+")->fetchAll();
+
+$clients = $pdo->query("SELECT id, nom FROM clients ORDER BY nom ASC")->fetchAll();
+
+$produits = $pdo->query("
+    SELECT id, nom, prix_vente, quantite_stock
+    FROM produits
+    ORDER BY nom ASC
+")->fetchAll();
 ?>
 <!DOCTYPE html>
 <html lang="fr">
@@ -94,41 +154,52 @@ function updateTotal(row) {
     let prix = parseFloat(row.querySelector('.prix').value);
     let qte = parseInt(row.querySelector('.qte').value);
     let stock = parseInt(row.querySelector('.qte').max);
+
     if (qte > stock) {
         alert("❌ Quantité demandée supérieure au stock disponible (" + stock + ").");
-        row.querySelector('.qte').value = stock;
         qte = stock;
+        row.querySelector('.qte').value = stock;
     }
+
     if (!isNaN(prix) && !isNaN(qte)) {
         row.querySelector('.total').value = (prix * qte).toFixed(2);
         updateGrandTotal();
     }
 }
+
 function updateGrandTotal() {
     let totaux = document.querySelectorAll('.total');
     let somme = 0;
     totaux.forEach(t => somme += parseFloat(t.value || 0));
     document.getElementById('grand_total').innerText = somme.toFixed(2) + " €";
 }
+
 function ajouterLigne() {
     const table = document.getElementById('table_produits');
     const clone = table.rows[1].cloneNode(true);
+
     clone.querySelectorAll('input').forEach(i => i.value = '');
     clone.querySelector('select').selectedIndex = 0;
+
     table.appendChild(clone);
 }
+
 function setPrixStock(select) {
     const option = select.selectedOptions[0];
     const prix = option.dataset.prix;
     const stock = option.dataset.stock;
+
     const row = select.closest('tr');
     row.querySelector('.prix').value = prix;
+
     const qteInput = row.querySelector('.qte');
     qteInput.max = stock;
     qteInput.placeholder = "max " + stock;
+
     updateTotal(row);
 }
 </script>
+
 </head>
 <body>
 
@@ -138,107 +209,125 @@ function setPrixStock(select) {
             <a href="../dashboard/index.php" class="logo-link">
                 <img src="../../assets/images/logo_epicerie.png" alt="Logo" class="logo-navbar">
             </a>
+
             <a href="../dashboard/index.php" class="nav-link">Tableau de bord</a>
             <a href="../stock/stock.php" class="nav-link">Stock</a>
-            <a href="ventes.php" class="nav-link">Ventes</a>
+            <a href="ventes.php" class="nav-link active">Ventes</a>
             <a href="../clients/clients.php" class="nav-link">Clients</a>
             <a href="../commandes/commandes.php" class="nav-link">Commandes</a>
             <a href="../stock/categories.php" class="nav-link">Catégories</a>
         </div>
+
         <a href="../auth/logout.php" class="logout">🚪 Déconnexion</a>
     </nav>
 </header>
 
 <div class="main-container">
-    <div class="content-wrapper">
-    <h1>💰 Gestion des ventes</h1>
+<div class="content-wrapper">
 
-        <?php if ($message): ?>
-            <div class="message <?= strpos($message, '✅') !== false ? 'success' : 'error' ?>">
-                <?= $message ?>
-            </div>
-        <?php endif; ?>
+<h1>💰 Gestion des ventes</h1>
 
-    <h3>🧾 Nouvelle vente</h3>
-    <form method="POST">
-            <div class="form-group">
+<?php if ($message): ?>
+<div class="message <?= strpos($message, '✅') !== false ? 'success' : 'error' ?>">
+    <?= $message ?>
+</div>
+<?php endif; ?>
+
+<h3>🧾 Nouvelle vente</h3>
+
+<form method="POST">
+
+    <div class="form-group">
         <label>Client :</label>
         <select name="id_client">
             <option value="">-- Aucun client --</option>
-            <?php while ($c = (is_object($clients) && method_exists($clients, 'fetch_assoc') ? $clients->fetch_assoc() : mysqli_fetch_assoc($clients))): ?>
+            <?php foreach ($clients as $c): ?>
                 <option value="<?= $c['id'] ?>"><?= htmlspecialchars($c['nom']) ?></option>
-            <?php endwhile; ?>
+            <?php endforeach; ?>
         </select>
-            </div>
+    </div>
 
-        <table id="table_produits">
-                <thead>
-                    <tr>
-                        <th>Produit</th>
-                        <th>Prix (€)</th>
-                        <th>Quantité</th>
-                        <th>Total (€)</th>
-                    </tr>
-                </thead>
-                <tbody>
+    <table id="table_produits">
+        <thead>
+            <tr>
+                <th>Produit</th>
+                <th>Prix (€)</th>
+                <th>Quantité</th>
+                <th>Total (€)</th>
+            </tr>
+        </thead>
+        <tbody>
             <tr>
                 <td>
-                            <select name="produit_id[]" onchange="setPrixStock(this)" style="width: 100%; padding: 10px; border-radius: 8px; border: 2px solid #e0e0e0;">
+                    <select name="produit_id[]" onchange="setPrixStock(this)">
                         <option value="">-- Sélectionner --</option>
-                        <?php
-                        mysqli_data_seek($produits, 0);
-                        while ($p = (is_object($produits) && method_exists($produits, 'fetch_assoc') ? $produits->fetch_assoc() : mysqli_fetch_assoc($produits))): ?>
-                            <option value="<?= $p['id'] ?>" data-prix="<?= $p['prix_vente'] ?>" data-stock="<?= $p['quantite_stock'] ?>">
-                                <?= htmlspecialchars($p['nom']) ?> (<?= $p['quantite_stock'] ?> en stock)
-                            </option>
-                        <?php endwhile; ?>
+                        <?php foreach ($produits as $p): ?>
+                        <option value="<?= $p['id'] ?>"
+                                data-prix="<?= $p['prix_vente'] ?>"
+                                data-stock="<?= $p['quantite_stock'] ?>">
+                            <?= htmlspecialchars($p['nom']) ?> (<?= $p['quantite_stock'] ?> en stock)
+                        </option>
+                        <?php endforeach; ?>
                     </select>
                 </td>
-                        <td><input type="number" class="prix" name="prix_unitaire[]" readonly style="width: 100%;"></td>
-                        <td><input type="number" class="qte" name="quantite[]" min="1" oninput="updateTotal(this.closest('tr'))" style="width: 100%;"></td>
-                        <td><input type="number" class="total" name="prix_total[]" step="0.01" readonly style="width: 100%;"></td>
+
+                <td><input type="number" class="prix" name="prix_unitaire[]" readonly></td>
+
+                <td><input type="number" class="qte" name="quantite[]" min="1"
+                           oninput="updateTotal(this.closest('tr'))"></td>
+
+                <td><input type="number" class="total" name="prix_total[]" readonly></td>
             </tr>
-                </tbody>
-        </table>
+        </tbody>
+    </table>
 
-            <p style="margin-top: 15px;">
-                <button type="button" onclick="ajouterLigne()" class="btn btn-info">➕ Ajouter un produit</button>
-            </p>
-            <div style="text-align: right; font-weight: bold; font-size: 1.2em; margin: 20px 0; color: var(--primary-color);">
-                Total général : <span id="grand_total">0.00 €</span>
-            </div>
-            <button type="submit" name="ajouter" class="btn">✅ Enregistrer la vente</button>
-    </form>
+    <p>
+        <button type="button" onclick="ajouterLigne()" class="btn btn-info">➕ Ajouter un produit</button>
+    </p>
 
-    <h3>📋 Liste des ventes</h3>
-    <table>
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Client</th>
-                    <th>Vendeur</th>
-                    <th>Date</th>
-                    <th>Total (€)</th>
-                    <th>Action</th>
-                </tr>
-            </thead>
-            <tbody>
-        <?php while ($v = (is_object($ventes) && method_exists($ventes, 'fetch_assoc') ? $ventes->fetch_assoc() : mysqli_fetch_assoc($ventes))): ?>
+    <div style="text-align: right; font-weight: bold; font-size: 1.4em;">
+        Total général : <span id="grand_total">0.00 €</span>
+    </div>
+
+    <button type="submit" name="ajouter" class="btn">💾 Enregistrer la vente</button>
+</form>
+
+<h3>📋 Liste des ventes</h3>
+
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Client</th>
+            <th>Vendeur</th>
+            <th>Date</th>
+            <th>Total (€)</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+
+        <?php foreach ($ventes as $v): ?>
         <tr>
             <td><?= $v['id'] ?></td>
             <td><?= htmlspecialchars($v['client'] ?? "N/A") ?></td>
             <td><?= htmlspecialchars($v['vendeur'] ?? "N/A") ?></td>
-                    <td><?= date('d/m/Y H:i', strtotime($v['date_vente'])) ?></td>
-                    <td style="font-weight: bold; color: var(--success-color);"><?= number_format($v['total'], 2, ',', ' ') ?> €</td>
+            <td><?= date('d/m/Y H:i', strtotime($v['date_vente'])) ?></td>
+            <td style="font-weight:bold;color:var(--success-color);">
+                <?= number_format($v['total'], 2, ',', ' ') ?> €
+            </td>
             <td>
-                        <a href="detailVente.php?id=<?= $v['id'] ?>" class="btn btn-info btn-sm">🔍 Détails</a>
-                        <a href="?supprimer=<?= $v['id'] ?>" class="btn btn-danger btn-sm" onclick="return confirm('Êtes-vous sûr ?')">🗑️ Supprimer</a>
+                <a href="detailVente.php?id=<?= $v['id'] ?>" class="btn btn-info btn-sm">🔍 Détails</a>
+                <a href="?supprimer=<?= $v['id'] ?>" class="btn btn-danger btn-sm"
+                   onclick="return confirm('Supprimer cette vente ?');">🗑️ Supprimer</a>
             </td>
         </tr>
-        <?php endwhile; ?>
-            </tbody>
-    </table>
-    </div>
+        <?php endforeach; ?>
+
+    </tbody>
+</table>
+
+</div>
 </div>
 
 </body>

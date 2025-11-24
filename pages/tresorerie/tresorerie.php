@@ -5,484 +5,576 @@ if (!isset($_SESSION['id_utilisateur'])) {
     exit();
 }
 
-include('../../config/db_conn.php');
-include('../../includes/historique_helper.php');
-include('../../includes/export_helper.php');
-include('../../includes/role_helper.php');
-include_once('../../includes/permissions_helper.php');
+require_once('../../config/db_conn.php'); // fourni : $pdo
+require_once('../../includes/historique_helper.php');
+require_once('../../includes/export_helper.php');
+require_once('../../includes/role_helper.php');
+require_once('../../includes/permissions_helper.php');
 
 $role = $_SESSION['role'];
 $id_utilisateur = $_SESSION['id_utilisateur'];
 $message = "";
 
-// Créer la table depenses_diverses si elle n'existe pas
-$table_exists = $conn->query("SHOW TABLES LIKE 'depenses_diverses'");
-if ((is_object($table_exists) && method_exists($table_exists, 'num_rows') ? $table_exists->num_rows() : mysqli_num_rows($table_exists)) == 0) {
-    $create_table = "CREATE TABLE IF NOT EXISTS depenses_diverses (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        type_operation ENUM('depense', 'entree') NOT NULL,
-        libelle VARCHAR(255) NOT NULL,
-        montant DECIMAL(10,2) NOT NULL,
-        date_operation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        id_utilisateur INT NOT NULL,
-        notes TEXT NULL,
-        FOREIGN KEY (id_utilisateur) REFERENCES utilisateurs(id) ON DELETE CASCADE
-    )";
-    $conn->query($create_table);
+// === CRÉATION TABLE POSTGRESQL ===
+// remplace SHOW TABLES par information_schema
+$check = $pdo->prepare("
+    SELECT table_name 
+    FROM information_schema.tables 
+    WHERE table_schema='public' AND table_name='depenses_diverses'
+");
+$check->execute();
+$table_exists = $check->fetchColumn();
+
+if (!$table_exists) {
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS depenses_diverses (
+            id SERIAL PRIMARY KEY,
+            type_operation VARCHAR(20) NOT NULL CHECK (type_operation IN ('depense','entree')),
+            libelle VARCHAR(255) NOT NULL,
+            montant NUMERIC(10,2) NOT NULL,
+            date_operation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            id_utilisateur INT NOT NULL,
+            notes TEXT NULL,
+            CONSTRAINT fk_utilisateur FOREIGN KEY(id_utilisateur)
+                REFERENCES utilisateurs(id) ON DELETE CASCADE
+        )
+    ");
 }
 
 // === GESTION DES ACCÈS ===
 $est_admin = ($role === 'admin');
 $est_vendeur = ($role === 'vendeur');
 
-// Vérifier si l'utilisateur a la permission d'accès à la trésorerie
 $acces_autorise = false;
 if ($est_vendeur || !$est_admin) {
-    $acces_autorise = aPermission($conn, $id_utilisateur, 'acces_tresorerie');
+    $acces_autorise = aPermission($pdo, $id_utilisateur, 'acces_tresorerie');
 }
 
-// Si utilisateur sans accès, vérifier s'il a déjà une demande en attente
 $demande_en_attente = false;
+
 if (!$est_admin && !$acces_autorise) {
-    $check_attente = $conn->prepare("
-        SELECT id FROM demandes_acces 
-        WHERE id_utilisateur = ? 
-        AND (permission_demande = 'acces_tresorerie' OR permission_demande = 'acces_general')
-        AND statut = 'en_attente'
+
+    $stmt = $pdo->prepare("
+        SELECT id
+        FROM demandes_acces
+        WHERE id_utilisateur = ?
+        AND (permission_demande='acces_tresorerie' OR permission_demande='acces_general')
+        AND statut='en_attente'
         LIMIT 1
     ");
-    $check_attente->bind_param("i", $id_utilisateur);
-    $check_attente->execute();
-    $result_attente = $check_attente->get_result();
-    $demande_en_attente = ((is_object($result_attente) && method_exists($result_attente, 'num_rows') ? $result_attente->num_rows() : mysqli_num_rows($result_attente)) > 0);
-    $check_attente->close();
+    $stmt->execute([$id_utilisateur]);
+    $demande_en_attente = (bool)$stmt->fetch();
 }
 
-// Créer une demande d'accès
+// CREER DEMANDE D'ACCÈS
 if (!$est_admin && !$acces_autorise && !$demande_en_attente && isset($_POST['demander_acces'])) {
     $raison = trim($_POST['raison'] ?? '');
-    if (empty($raison)) {
-        $message = "⚠️ Veuillez indiquer une raison pour votre demande.";
+    if ($raison === '') {
+        $message = "⚠️ Veuillez indiquer une raison.";
     } else {
-        $stmt = $conn->prepare("INSERT INTO demandes_acces (id_utilisateur, type_demande, permission_demande, raison) VALUES (?, 'permission_specifique', 'acces_tresorerie', ?)");
-        $stmt->bind_param("is", $id_utilisateur, $raison);
-        if ($stmt->execute()) {
-            $message = "✅ Votre demande d'accès a été envoyée. Un administrateur va l'examiner.";
+        $stmt = $pdo->prepare("
+            INSERT INTO demandes_acces (id_utilisateur, type_demande, permission_demande, raison)
+            VALUES (?, 'permission_specifique', 'acces_tresorerie', ?)
+        ");
+        if ($stmt->execute([$id_utilisateur, $raison])) {
+            $message = "✅ Demande envoyée.";
             $demande_en_attente = true;
         } else {
-            $message = "❌ Erreur lors de l'envoi de la demande.";
+            $message = "❌ Erreur lors de l'envoi.";
         }
-        $stmt->close();
     }
 }
 
-// Si vendeur sans accès et sans demande, afficher le formulaire de demande
+// PAGE DEMANDE — PAS D’ACCÈS
 if (!$est_admin && !$acces_autorise && !$demande_en_attente) {
-    // Afficher la page de demande d'accès
-    ?>
-    <!DOCTYPE html>
-    <html lang="fr">
-    <head>
-    <meta charset="UTF-8">
-    <title>💰 Trésorerie - Accès limité - Smart Stock</title>
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <link rel="stylesheet" href="../../assets/css/styles_connected.css">
-    </head>
-    <body>
-    <header>
-        <nav class="navbar">
-            <div class="nav-left">
-                <a href="../dashboard/index.php" class="logo-link">
-                    <img src="../../assets/images/logo_epicerie.png" alt="Logo" class="logo-navbar">
-                </a>
-                <a href="../dashboard/index.php" class="nav-link">Tableau de bord</a>
-                <a href="../stock/stock.php" class="nav-link">Stock</a>
-                <a href="../ventes/ventes.php" class="nav-link">Ventes</a>
-                <a href="../clients/clients.php" class="nav-link">Clients</a>
-                <a href="../commandes/commandes.php" class="nav-link">Commandes</a>
-                <a href="../stock/categories.php" class="nav-link">Catégories</a>
-            </div>
-            <a href="../auth/logout.php" class="logout">🚪 Déconnexion</a>
-        </nav>
-    </header>
-    <div class="main-container">
-        <div class="content-wrapper">
-            <h1>💰 Trésorerie</h1>
-            <div class="alert alert-warning">
-                <h3>🔐 Accès limité</h3>
-                <p>Vous n'avez pas accès à cette page. Veuillez demander l'autorisation à un administrateur.</p>
-            </div>
-            <?php if ($message): ?>
-                <div class="alert <?= strpos($message, '✅') !== false ? 'alert-success' : 'alert-danger' ?>">
-                    <?= htmlspecialchars($message) ?>
-                </div>
-            <?php endif; ?>
-            <form method="POST" class="form-container">
-                <h3>Demander un accès à la trésorerie</h3>
-                <div class="form-group">
-                    <label>Raison de la demande *</label>
-                    <textarea name="raison" class="form-control" rows="4" required placeholder="Ex: Besoin de consulter le chiffre d'affaires du mois pour préparer un rapport..."></textarea>
-                </div>
-                <button type="submit" name="demander_acces" class="btn btn-primary">📤 Envoyer la demande</button>
-                <a href="../dashboard/index.php" class="btn btn-secondary">⬅️ Retour au tableau de bord</a>
-            </form>
+?>
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>💰 Trésorerie - Accès limité</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="../../assets/css/styles_connected.css">
+</head>
+<body>
+<header>
+    <nav class="navbar">
+        <div class="nav-left">
+            <a href="../dashboard/index.php" class="logo-link">
+                <img src="../../assets/images/logo_epicerie.png" class="logo-navbar">
+            </a>
+            <a href="../dashboard/index.php" class="nav-link">Tableau de bord</a>
+            <a href="../stock/stock.php" class="nav-link">Stock</a>
+            <a href="../ventes/ventes.php" class="nav-link">Ventes</a>
+            <a href="../clients/clients.php" class="nav-link">Clients</a>
+            <a href="../commandes/commandes.php" class="nav-link">Commandes</a>
+            <a href="../stock/categories.php" class="nav-link">Catégories</a>
         </div>
-    </div>
-    </body>
-    </html>
-    <?php
-    exit();
-}
+        <a href="../auth/logout.php" class="logout">🚪 Déconnexion</a>
+    </nav>
+</header>
 
-// Si utilisateur avec demande en attente (mais pas encore approuvée)
+<div class="main-container">
+<div class="content-wrapper">
+
+<h1>💰 Trésorerie</h1>
+
+<div class="alert alert-warning">
+    <h3>🔐 Accès limité</h3>
+    <p>Vous n'avez pas accès à cette page.</p>
+</div>
+
+<?php if ($message): ?>
+<div class="alert alert-danger"><?= htmlspecialchars($message) ?></div>
+<?php endif; ?>
+
+<form method="POST">
+    <h3>Demander un accès</h3>
+    <textarea name="raison" required></textarea>
+    <button name="demander_acces" class="btn btn-primary">Envoyer</button>
+    <a class="btn btn-secondary" href="../dashboard/index.php">Retour</a>
+</form>
+
+</div></div></body></html>
+<?php exit; } ?>
+<?php
+// SI DEMANDE EN ATTENTE
 if (!$est_admin && !$acces_autorise && $demande_en_attente) {
-    ?>
-    <!DOCTYPE html>
-    <html lang="fr">
-    <head>
-    <meta charset="UTF-8">
-    <title>💰 Trésorerie - Accès limité - Smart Stock</title>
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <link rel="stylesheet" href="../../assets/css/styles_connected.css">
-    </head>
-    <body>
-    <header>
-        <nav class="navbar">
-            <div class="nav-left">
-                <a href="../dashboard/index.php" class="logo-link">
-                    <img src="../../assets/images/logo_epicerie.png" alt="Logo" class="logo-navbar">
-                </a>
-                <a href="../dashboard/index.php" class="nav-link">Tableau de bord</a>
-                <a href="../stock/stock.php" class="nav-link">Stock</a>
-                <a href="../ventes/ventes.php" class="nav-link">Ventes</a>
-                <a href="../clients/clients.php" class="nav-link">Clients</a>
-                <a href="../commandes/commandes.php" class="nav-link">Commandes</a>
-                <a href="../stock/categories.php" class="nav-link">Catégories</a>
-            </div>
-            <a href="../auth/logout.php" class="logout">🚪 Déconnexion</a>
-        </nav>
-    </header>
-    <div class="main-container">
-        <div class="content-wrapper">
-            <h1>💰 Trésorerie</h1>
-            <div class="alert alert-info">
-                <h3>⏳ Demande en attente</h3>
-                <p>Votre demande d'accès a été envoyée et est en cours d'examen par un administrateur.</p>
-                <p>Vous pouvez consulter l'historique de vos demandes dans la page <a href="../admin/demandes_acces.php">Demandes d'accès</a>.</p>
-            </div>
-            <a href="../dashboard/index.php" class="btn btn-secondary">⬅️ Retour au tableau de bord</a>
-        </div>
+?>
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>💰 Trésorerie - Accès en attente</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="../../assets/css/styles_connected.css">
+</head>
+<body>
+<header>
+<nav class="navbar">
+    <div class="nav-left">
+        <a href="../dashboard/index.php" class="logo-link">
+            <img src="../../assets/images/logo_epicerie.png" class="logo-navbar">
+        </a>
+        <a href="../dashboard/index.php" class="nav-link">Tableau de bord</a>
+        <a href="../stock/stock.php" class="nav-link">Stock</a>
+        <a href="../ventes/ventes.php" class="nav-link">Ventes</a>
+        <a href="../clients/clients.php" class="nav-link">Clients</a>
+        <a href="../commandes/commandes.php" class="nav-link">Commandes</a>
+        <a href="../stock/categories.php" class="nav-link">Catégories</a>
     </div>
-    </body>
-    </html>
-    <?php
-    exit();
+    <a href="../auth/logout.php" class="logout">🚪 Déconnexion</a>
+</nav>
+</header>
+
+<div class="main-container">
+<div class="content-wrapper">
+
+<h1>💰 Trésorerie</h1>
+
+<div class="alert alert-info">
+    <h3>⏳ Demande en attente</h3>
+    <p>Votre demande a été transmise et attend validation.</p>
+</div>
+
+<a href="../dashboard/index.php" class="btn btn-secondary">Retour</a>
+
+</div></div>
+</body>
+</html>
+<?php
+exit;
 }
 
-// === FONCTIONNALITÉS ADMIN ===
-
-// Filtre de période
+// === FILTRE DE PÉRIODE ===
 $periode = $_GET['periode'] ?? 'mois';
-$date_debut = '';
-$date_fin = '';
 
 switch ($periode) {
     case 'jour':
         $date_debut = date('Y-m-d');
-        $date_fin = date('Y-m-d');
+        $date_fin   = date('Y-m-d');
         break;
+
     case 'semaine':
         $date_debut = date('Y-m-d', strtotime('monday this week'));
-        $date_fin = date('Y-m-d', strtotime('sunday this week'));
+        $date_fin   = date('Y-m-d', strtotime('sunday this week'));
         break;
-    case 'mois':
-        $date_debut = date('Y-m-01');
-        $date_fin = date('Y-m-t');
-        break;
+
     case 'annee':
         $date_debut = date('Y-01-01');
-        $date_fin = date('Y-12-31');
+        $date_fin   = date('Y-12-31');
         break;
+
     case 'personnalise':
         $date_debut = $_GET['date_debut'] ?? date('Y-m-01');
-        $date_fin = $_GET['date_fin'] ?? date('Y-m-t');
+        $date_fin   = $_GET['date_fin'] ?? date('Y-m-t');
         break;
+
+    default:
+        $date_debut = date('Y-m-01');
+        $date_fin   = date('Y-m-t');
 }
 
-// Export CSV
+// === EXPORT CSV ===
 if ($est_admin && isset($_GET['export']) && $_GET['export'] === 'csv') {
+
     $query = "
-        SELECT 
-            DATE(date_vente) as date,
-            'Vente' as type,
-            total as montant,
-            CONCAT('Vente #', id) as libelle
+        SELECT date_vente AS date, 'Vente' AS type, total AS montant,
+               CONCAT('Vente #', id) AS libelle
         FROM ventes
-        WHERE DATE(date_vente) BETWEEN '$date_debut' AND '$date_fin'
+        WHERE DATE(date_vente) BETWEEN :d1 AND :d2
+
         UNION ALL
-        SELECT 
-            DATE(date_achat) as date,
-            'Achat' as type,
-            montant_total as montant,
-            CONCAT('Achat #', id) as libelle
+
+        SELECT date_achat AS date, 'Achat' AS type, montant_total AS montant,
+               CONCAT('Achat #', id) AS libelle
         FROM achats
-        WHERE DATE(date_achat) BETWEEN '$date_debut' AND '$date_fin'
+        WHERE DATE(date_achat) BETWEEN :d1 AND :d2
+
         UNION ALL
-        SELECT 
-            DATE(date_operation) as date,
-            IF(type_operation = 'depense', 'Dépense', 'Entrée') as type,
-            IF(type_operation = 'depense', -montant, montant) as montant,
-            libelle
+
+        SELECT date_operation AS date,
+               CASE WHEN type_operation='depense' THEN 'Dépense' ELSE 'Entrée' END AS type,
+               CASE WHEN type_operation='depense' THEN -montant ELSE montant END AS montant,
+               libelle
         FROM depenses_diverses
-        WHERE DATE(date_operation) BETWEEN '$date_debut' AND '$date_fin'
+        WHERE DATE(date_operation) BETWEEN :d1 AND :d2
+
         ORDER BY date DESC
     ";
-    $headers = ['Date', 'Type', 'Montant (€)', 'Libellé'];
-    export_excel($conn, $query, 'tresorerie_' . $periode . '_' . date('Y-m-d'), $headers);
+
+    export_excel_pdo(
+        $pdo,
+        $query,
+        ['d1' => $date_debut, 'd2' => $date_fin],
+        "tresorerie_{$periode}_" . date('Y-m-d'),
+        ['Date','Type','Montant (€)','Libellé']
+    );
+
+    exit;
 }
 
-// Ajout d'une dépense/entrée diverse
+// === AJOUT D'UNE OPERATION ===
 if ($est_admin && isset($_POST['ajouter_operation'])) {
-    $type_op = $_POST['type_operation'];
-    $libelle = trim($_POST['libelle']);
-    $montant = floatval($_POST['montant']);
+
+    $type = $_POST['type_operation'];
+    $lib  = trim($_POST['libelle']);
+    $mont = floatval($_POST['montant']);
     $notes = trim($_POST['notes'] ?? '');
-    
-    if (empty($libelle) || $montant <= 0) {
-        $message = "⚠️ Veuillez remplir tous les champs correctement.";
+
+    if ($lib === '' || $mont <= 0) {
+        $message = "⚠️ Champs invalides.";
     } else {
-        $stmt = $conn->prepare("INSERT INTO depenses_diverses (type_operation, libelle, montant, id_utilisateur, notes) VALUES (?, ?, ?, ?, ?)");
-        $stmt->bind_param("ssdis", $type_op, $libelle, $montant, $id_utilisateur, $notes);
-        if ($stmt->execute()) {
-            $id_operation = db_get_insert_id($conn);
-            enregistrer_historique($conn, $id_utilisateur, 'INSERT', 'depenses_diverses', $id_operation, "Ajout d'une opération de trésorerie : $libelle");
-            $message = "✅ Opération enregistrée avec succès.";
-        } else {
-            $message = "❌ Erreur lors de l'enregistrement.";
-        }
-        $stmt->close();
+        $stmt = $pdo->prepare("
+            INSERT INTO depenses_diverses (type_operation, libelle, montant, id_utilisateur, notes)
+            VALUES (:t, :l, :m, :u, :n)
+        ");
+        $stmt->execute([
+            ':t' => $type,
+            ':l' => $lib,
+            ':m' => $mont,
+            ':u' => $id_utilisateur,
+            ':n' => $notes
+        ]);
+
+        $id_op = db_last_id($pdo, 'depenses_diverses');
+
+        enregistrer_historique(
+            $pdo,
+            $id_utilisateur,
+            'INSERT',
+            'depenses_diverses',
+            $id_op,
+            "Ajout trésorerie : $lib"
+        );
+
+        $message = "✅ Opération enregistrée.";
     }
 }
 
-// Modification d'une dépense/entrée diverse
+// === MODIFICATION ===
 if ($est_admin && isset($_POST['modifier_operation'])) {
+
     $id_op = intval($_POST['id_operation']);
-    $type_op = $_POST['type_operation'];
-    $libelle = trim($_POST['libelle']);
-    $montant = floatval($_POST['montant']);
-    $notes = trim($_POST['notes'] ?? '');
-    
-    // Récupérer anciennes valeurs
-    $old = mysqli_fetch_assoc($conn->query("SELECT * FROM depenses_diverses WHERE id = $id_op"));
-    
-    $stmt = $conn->prepare("UPDATE depenses_diverses SET type_operation = ?, libelle = ?, montant = ?, notes = ? WHERE id = ?");
-    $stmt->bind_param("ssdsi", $type_op, $libelle, $montant, $notes, $id_op);
-    if ($stmt->execute()) {
-        enregistrer_historique($conn, $id_utilisateur, 'UPDATE', 'depenses_diverses', $id_op, "Modification d'une opération de trésorerie", $old, ['type_operation' => $type_op, 'libelle' => $libelle, 'montant' => $montant, 'notes' => $notes]);
-        $message = "✅ Opération modifiée avec succès.";
-    } else {
-        $message = "❌ Erreur lors de la modification.";
-    }
-    $stmt->close();
+
+    $r = $pdo->prepare("SELECT * FROM depenses_diverses WHERE id = ?");
+    $r->execute([$id_op]);
+    $old = $r->fetch(PDO::FETCH_ASSOC);
+
+    $stmt = $pdo->prepare("
+        UPDATE depenses_diverses
+        SET type_operation=:t, libelle=:l, montant=:m, notes=:n
+        WHERE id=:id
+    ");
+
+    $stmt->execute([
+        ':t' => $_POST['type_operation'],
+        ':l' => trim($_POST['libelle']),
+        ':m' => floatval($_POST['montant']),
+        ':n' => trim($_POST['notes'] ?? ''),
+        ':id' => $id_op
+    ]);
+
+    enregistrer_historique($pdo, $id_utilisateur, 'UPDATE', 'depenses_diverses', $id_op, "Modification trésorerie", $old);
+
+    $message = "✅ Opération modifiée.";
 }
 
-// Suppression d'une dépense/entrée diverse
+// === SUPPRESSION ===
 if ($est_admin && isset($_GET['supprimer_operation'])) {
-    $id_op = intval($_GET['supprimer_operation']);
-    $old = mysqli_fetch_assoc($conn->query("SELECT * FROM depenses_diverses WHERE id = $id_op"));
-    $conn->query("DELETE FROM depenses_diverses WHERE id = $id_op");
-    enregistrer_historique($conn, $id_utilisateur, 'DELETE', 'depenses_diverses', $id_op, "Suppression d'une opération de trésorerie", $old);
-    $message = "✅ Opération supprimée avec succès.";
-    header("Location: tresorerie.php?periode=$periode");
-    exit();
-}
 
+    $id_op = intval($_GET['supprimer_operation']);
+
+    $r = $pdo->prepare("SELECT * FROM depenses_diverses WHERE id = ?");
+    $r->execute([$id_op]);
+    $old = $r->fetch(PDO::FETCH_ASSOC);
+
+    $pdo->prepare("DELETE FROM depenses_diverses WHERE id = ?")->execute([$id_op]);
+
+    enregistrer_historique($pdo, $id_utilisateur, 'DELETE', 'depenses_diverses', $id_op, "Suppression trésorerie", $old);
+
+    header("Location: tresorerie.php?periode=$periode");
+    exit;
+}
 // === CALCUL DES STATISTIQUES ===
 
 // CA du jour
-$ca_jour_query = "SELECT SUM(total) as total FROM ventes WHERE DATE(date_vente) = CURDATE()";
-$ca_jour_result = $conn->query($ca_jour_query);
-$ca_jour = floatval((is_object($ca_jour_result) && method_exists($ca_jour_result, 'fetch_assoc') ? $ca_jour_result->fetch_assoc() : mysqli_fetch_assoc($ca_jour_result))['total'] ?? 0);
+$stmt = $pdo->prepare("SELECT SUM(total) as total FROM ventes WHERE DATE(date_vente) = CURRENT_DATE");
+$stmt->execute();
+$ca_jour = floatval($stmt->fetchColumn() ?: 0);
 
 // CA du mois
-$ca_mois_query = "SELECT SUM(total) as total FROM ventes WHERE MONTH(date_vente) = MONTH(CURDATE()) AND YEAR(date_vente) = YEAR(CURDATE())";
-$ca_mois_result = $conn->query($ca_mois_query);
-$ca_mois = floatval((is_object($ca_mois_result) && method_exists($ca_mois_result, 'fetch_assoc') ? $ca_mois_result->fetch_assoc() : mysqli_fetch_assoc($ca_mois_result))['total'] ?? 0);
+$stmt = $pdo->prepare("
+    SELECT SUM(total) 
+    FROM ventes 
+    WHERE EXTRACT(MONTH FROM date_vente) = EXTRACT(MONTH FROM CURRENT_DATE)
+    AND EXTRACT(YEAR FROM date_vente) = EXTRACT(YEAR FROM CURRENT_DATE)
+");
+$stmt->execute();
+$ca_mois = floatval($stmt->fetchColumn() ?: 0);
 
 // CA total
-$ca_total_query = "SELECT SUM(total) as total FROM ventes";
-$ca_total_result = $conn->query($ca_total_query);
-$ca_total = floatval((is_object($ca_total_result) && method_exists($ca_total_result, 'fetch_assoc') ? $ca_total_result->fetch_assoc() : mysqli_fetch_assoc($ca_total_result))['total'] ?? 0);
+$stmt = $pdo->query("SELECT SUM(total) FROM ventes");
+$ca_total = floatval($stmt->fetchColumn() ?: 0);
 
 // Total achats fournisseurs
-$achats_total_query = "SELECT SUM(montant_total) as total FROM achats";
-$achats_total_result = $conn->query($achats_total_query);
-$achats_total = floatval((is_object($achats_total_result) && method_exists($achats_total_result, 'fetch_assoc') ? $achats_total_result->fetch_assoc() : mysqli_fetch_assoc($achats_total_result))['total'] ?? 0);
+$stmt = $pdo->query("SELECT SUM(montant_total) FROM achats");
+$achats_total = floatval($stmt->fetchColumn() ?: 0);
 
-// Achats de la période
-$achats_periode_query = "SELECT SUM(montant_total) as total FROM achats WHERE DATE(date_achat) BETWEEN '$date_debut' AND '$date_fin'";
-$achats_periode_result = $conn->query($achats_periode_query);
-$achats_periode = floatval((is_object($achats_periode_result) && method_exists($achats_periode_result, 'fetch_assoc') ? $achats_periode_result->fetch_assoc() : mysqli_fetch_assoc($achats_periode_result))['total'] ?? 0);
+// Achats période
+$stmt = $pdo->prepare("
+    SELECT SUM(montant_total)
+    FROM achats
+    WHERE DATE(date_achat) BETWEEN :d1 AND :d2
+");
+$stmt->execute([':d1'=>$date_debut, ':d2'=>$date_fin]);
+$achats_periode = floatval($stmt->fetchColumn() ?: 0);
 
-// CA de la période
-$ca_periode_query = "SELECT SUM(total) as total FROM ventes WHERE DATE(date_vente) BETWEEN '$date_debut' AND '$date_fin'";
-$ca_periode_result = $conn->query($ca_periode_query);
-$ca_periode = floatval((is_object($ca_periode_result) && method_exists($ca_periode_result, 'fetch_assoc') ? $ca_periode_result->fetch_assoc() : mysqli_fetch_assoc($ca_periode_result))['total'] ?? 0);
+// CA période
+$stmt = $pdo->prepare("
+    SELECT SUM(total)
+    FROM ventes
+    WHERE DATE(date_vente) BETWEEN :d1 AND :d2
+");
+$stmt->execute([':d1'=>$date_debut, ':d2'=>$date_fin]);
+$ca_periode = floatval($stmt->fetchColumn() ?: 0);
 
-// Dépenses diverses (total)
-$depenses_diverses_query = "SELECT 
-    SUM(CASE WHEN type_operation = 'depense' THEN montant ELSE 0 END) as total_depenses,
-    SUM(CASE WHEN type_operation = 'entree' THEN montant ELSE 0 END) as total_entrees
-    FROM depenses_diverses";
-$depenses_diverses_result = $conn->query($depenses_diverses_query);
-$depenses_diverses = (is_object($depenses_diverses_result) && method_exists($depenses_diverses_result, 'fetch_assoc') ? $depenses_diverses_result->fetch_assoc() : mysqli_fetch_assoc($depenses_diverses_result));
-$total_depenses_diverses = floatval($depenses_diverses['total_depenses'] ?? 0);
-$total_entrees_diverses = floatval($depenses_diverses['total_entrees'] ?? 0);
-
-// Dépenses diverses de la période
-$depenses_periode_query = "SELECT 
-    SUM(CASE WHEN type_operation = 'depense' THEN montant ELSE 0 END) as total_depenses,
-    SUM(CASE WHEN type_operation = 'entree' THEN montant ELSE 0 END) as total_entrees
+// Dépenses diverses globales
+$stmt = $pdo->query("
+    SELECT 
+        SUM(CASE WHEN type_operation='depense' THEN montant ELSE 0 END) AS total_depenses,
+        SUM(CASE WHEN type_operation='entree' THEN montant ELSE 0 END) AS total_entrees
     FROM depenses_diverses
-    WHERE DATE(date_operation) BETWEEN '$date_debut' AND '$date_fin'";
-$depenses_periode_result = $conn->query($depenses_periode_query);
-$depenses_periode = (is_object($depenses_periode_result) && method_exists($depenses_periode_result, 'fetch_assoc') ? $depenses_periode_result->fetch_assoc() : mysqli_fetch_assoc($depenses_periode_result));
-$total_depenses_periode = floatval($depenses_periode['total_depenses'] ?? 0);
-$total_entrees_periode = floatval($depenses_periode['total_entrees'] ?? 0);
+");
+$row = $stmt->fetch();
+$total_depenses_diverses = floatval($row['total_depenses'] ?? 0);
+$total_entrees_diverses  = floatval($row['total_entrees'] ?? 0);
 
-// Marge brute (ventes - achats)
+// Dépenses diverses période
+$stmt = $pdo->prepare("
+    SELECT 
+        SUM(CASE WHEN type_operation='depense' THEN montant ELSE 0 END) AS total_depenses,
+        SUM(CASE WHEN type_operation='entree' THEN montant ELSE 0 END) AS total_entrees
+    FROM depenses_diverses
+    WHERE DATE(date_operation) BETWEEN :d1 AND :d2
+");
+$stmt->execute([':d1'=>$date_debut, ':d2'=>$date_fin]);
+$row = $stmt->fetch();
+$total_depenses_periode = floatval($row['total_depenses'] ?? 0);
+$total_entrees_periode  = floatval($row['total_entrees'] ?? 0);
+
+// Marge brute
 $marge_brute = $ca_total - $achats_total;
 $marge_brute_periode = $ca_periode - $achats_periode;
 
-// Bénéfice estimé (marge brute - dépenses diverses + entrées diverses)
-$benefice_estime = $marge_brute - $total_depenses_diverses + $total_entrees_diverses;
-$benefice_estime_periode = $marge_brute_periode - $total_depenses_periode + $total_entrees_periode;
+// Bénéfice estimé
+$benefice_estime =
+    $marge_brute - $total_depenses_diverses + $total_entrees_diverses;
 
-// === DONNÉES POUR GRAPHIQUES ===
+$benefice_estime_periode =
+    $marge_brute_periode - $total_depenses_periode + $total_entrees_periode;
 
-// Évolution des ventes (7 derniers jours)
-$ventes_7jours = $conn->query("
-    SELECT DATE(date_vente) as date, SUM(total) as total
+// =========================
+// 📈 Évolution des ventes 7 jours
+// =========================
+$stmt = $pdo->query("
+    SELECT DATE(date_vente) AS d, SUM(total) AS total
     FROM ventes
-    WHERE date_vente >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+    WHERE date_vente >= CURRENT_DATE - INTERVAL '7 days'
     GROUP BY DATE(date_vente)
-    ORDER BY date ASC
+    ORDER BY d ASC
 ");
 
 $labels_ventes = [];
 $data_ventes = [];
-while ($row = (is_object($ventes_7jours) && method_exists($ventes_7jours, 'fetch_assoc') ? $ventes_7jours->fetch_assoc() : mysqli_fetch_assoc($ventes_7jours))) {
-    $labels_ventes[] = date('d/m', strtotime($row['date']));
+
+while ($row = $stmt->fetch()) {
+    $labels_ventes[] = date('d/m', strtotime($row['d']));
     $data_ventes[] = floatval($row['total']);
 }
 
-// Évolution des achats (7 derniers jours)
-$achats_7jours = $conn->query("
-    SELECT DATE(date_achat) as date, SUM(montant_total) as total
+// =========================
+// 📉 Évolution achats 7 jours
+// =========================
+$stmt = $pdo->query("
+    SELECT DATE(date_achat) AS d, SUM(montant_total) AS total
     FROM achats
-    WHERE date_achat >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+    WHERE date_achat >= CURRENT_DATE - INTERVAL '7 days'
     GROUP BY DATE(date_achat)
-    ORDER BY date ASC
+    ORDER BY d ASC
 ");
 
-$labels_achats = [];
-$data_achats = [];
 $dates_achats = [];
-while ($row = (is_object($achats_7jours) && method_exists($achats_7jours, 'fetch_assoc') ? $achats_7jours->fetch_assoc() : mysqli_fetch_assoc($achats_7jours))) {
-    $dates_achats[] = date('d/m', strtotime($row['date']));
+$data_achats = [];
+
+while ($row = $stmt->fetch()) {
+    $dates_achats[] = date('d/m', strtotime($row['d']));
     $data_achats[] = floatval($row['total']);
 }
 
-// Fusionner les dates pour le graphique comparatif
+// Fusion des dates
 $all_dates = array_unique(array_merge($labels_ventes, $dates_achats));
 sort($all_dates);
 
-// Remplir les données manquantes avec 0
+// Remplissage automatique des trous
 $data_ventes_complete = [];
 $data_achats_complete = [];
-foreach ($all_dates as $date) {
-    $idx_vente = array_search($date, $labels_ventes);
-    $data_ventes_complete[] = $idx_vente !== false ? $data_ventes[$idx_vente] : 0;
-    
-    $idx_achat = array_search($date, $dates_achats);
-    $data_achats_complete[] = $idx_achat !== false ? $data_achats[$idx_achat] : 0;
-}
 
-// Bénéfice net par période (30 derniers jours)
-$benefices_30jours = $conn->query("
+foreach ($all_dates as $d) {
+    $i_v = array_search($d, $labels_ventes);
+    $i_a = array_search($d, $dates_achats);
+
+    $data_ventes_complete[] = $i_v !== false ? $data_ventes[$i_v] : 0;
+    $data_achats_complete[] = $i_a !== false ? $data_achats[$i_a] : 0;
+}
+// =========================
+// 💵 Bénéfice net 30 jours
+// =========================
+$stmt = $pdo->query("
+    WITH dates AS (
+        SELECT DISTINCT DATE(date_vente) AS d
+        FROM ventes
+        WHERE date_vente >= CURRENT_DATE - INTERVAL '30 days'
+        UNION
+        SELECT DISTINCT DATE(date_achat)
+        FROM achats
+        WHERE date_achat >= CURRENT_DATE - INTERVAL '30 days'
+        UNION
+        SELECT DISTINCT DATE(date_operation)
+        FROM depenses_diverses
+        WHERE date_operation >= CURRENT_DATE - INTERVAL '30 days'
+    )
     SELECT 
-        DATE(v.date_vente) as date,
-        COALESCE(SUM(v.total), 0) as ventes,
-        COALESCE(SUM(a.montant_total), 0) as achats,
-        COALESCE(SUM(CASE WHEN d.type_operation = 'depense' THEN d.montant ELSE 0 END), 0) as depenses,
-        COALESCE(SUM(CASE WHEN d.type_operation = 'entree' THEN d.montant ELSE 0 END), 0) as entrees
-    FROM (
-        SELECT DISTINCT DATE(date_vente) as date FROM ventes WHERE date_vente >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-        UNION
-        SELECT DISTINCT DATE(date_achat) as date FROM achats WHERE date_achat >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-        UNION
-        SELECT DISTINCT DATE(date_operation) as date FROM depenses_diverses WHERE date_operation >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-    ) dates
-    LEFT JOIN ventes v ON DATE(v.date_vente) = dates.date
-    LEFT JOIN achats a ON DATE(a.date_achat) = dates.date
-    LEFT JOIN depenses_diverses d ON DATE(d.date_operation) = dates.date
-    GROUP BY dates.date
-    ORDER BY dates.date ASC
+        d AS date,
+        COALESCE((SELECT SUM(total) FROM ventes v WHERE DATE(v.date_vente)=d), 0) AS ventes,
+        COALESCE((SELECT SUM(montant_total) FROM achats a WHERE DATE(a.date_achat)=d), 0) AS achats,
+        COALESCE((SELECT SUM(montant) FROM depenses_diverses dd WHERE DATE(dd.date_operation)=d AND dd.type_operation='depense'), 0) AS depenses,
+        COALESCE((SELECT SUM(montant) FROM depenses_diverses dd WHERE DATE(dd.date_operation)=d AND dd.type_operation='entree'), 0) AS entrees
+    FROM dates
+    ORDER BY d ASC
 ");
 
 $labels_benefices = [];
 $data_benefices = [];
-while ($row = (is_object($benefices_30jours) && method_exists($benefices_30jours, 'fetch_assoc') ? $benefices_30jours->fetch_assoc() : mysqli_fetch_assoc($benefices_30jours))) {
+
+while ($row = $stmt->fetch()) {
     $labels_benefices[] = date('d/m', strtotime($row['date']));
-    $benefice_jour = floatval($row['ventes']) - floatval($row['achats']) - floatval($row['depenses']) + floatval($row['entrees']);
-    $data_benefices[] = $benefice_jour;
+
+    $benefice = floatval($row['ventes'])
+                - floatval($row['achats'])
+                - floatval($row['depenses'])
+                + floatval($row['entrees']);
+
+    $data_benefices[] = $benefice;
 }
 
-// Liste des opérations (pour l'historique)
-$operations_query = "
-    SELECT 
-        DATE(date_vente) as date,
-        'Vente' as type,
-        total as montant,
-        CONCAT('Vente #', id) as libelle,
-        NULL as notes,
-        id as id_vente,
-        NULL as id_operation
-    FROM ventes
-    WHERE DATE(date_vente) BETWEEN '$date_debut' AND '$date_fin'
-    UNION ALL
-    SELECT 
-        DATE(date_achat) as date,
-        'Achat' as type,
-        montant_total as montant,
-        CONCAT('Achat #', id) as libelle,
-        NULL as notes,
-        NULL as id_vente,
-        NULL as id_operation
-    FROM achats
-    WHERE DATE(date_achat) BETWEEN '$date_debut' AND '$date_fin'
-    UNION ALL
-    SELECT 
-        DATE(date_operation) as date,
-        IF(type_operation = 'depense', 'Dépense', 'Entrée') as type,
-        montant,
-        libelle,
-        notes,
-        NULL as id_vente,
-        id as id_operation
-    FROM depenses_diverses
-    WHERE DATE(date_operation) BETWEEN '$date_debut' AND '$date_fin'
+
+// =========================
+// 📄 HISTORIQUE DES OPÉRATIONS
+// =========================
+$stmt = $pdo->prepare("
+    SELECT * FROM (
+        SELECT 
+            DATE(date_vente) AS date,
+            'Vente' AS type,
+            total AS montant,
+            CONCAT('Vente #', id) AS libelle,
+            NULL AS notes,
+            id AS id_vente,
+            NULL AS id_operation
+        FROM ventes
+        WHERE DATE(date_vente) BETWEEN :d1 AND :d2
+
+        UNION ALL
+
+        SELECT 
+            DATE(date_achat),
+            'Achat',
+            montant_total,
+            CONCAT('Achat #', id),
+            NULL,
+            NULL,
+            NULL
+        FROM achats
+        WHERE DATE(date_achat) BETWEEN :d1 AND :d2
+
+        UNION ALL
+
+        SELECT 
+            DATE(date_operation),
+            CASE WHEN type_operation='depense' THEN 'Dépense' ELSE 'Entrée' END,
+            montant,
+            libelle,
+            notes,
+            NULL,
+            id
+        FROM depenses_diverses
+        WHERE DATE(date_operation) BETWEEN :d1 AND :d2
+    ) AS t
     ORDER BY date DESC, montant DESC
     LIMIT 100
-";
+");
 
-$operations = $conn->query($operations_query);
+$stmt->execute([
+    ':d1' => $date_debut,
+    ':d2' => $date_fin
+]);
 
-// Récupérer une opération pour modification (admin)
+$operations = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+
+// =========================
+// 📄 Récupération d’une opération à éditer
+// =========================
 $operation_edit = null;
+
 if ($est_admin && isset($_GET['editer_operation'])) {
     $id_edit = intval($_GET['editer_operation']);
-    $operation_edit = mysqli_fetch_assoc($conn->query("SELECT * FROM depenses_diverses WHERE id = $id_edit"));
+
+    $stmt = $pdo->prepare("SELECT * FROM depenses_diverses WHERE id = :id");
+    $stmt->execute([':id' => $id_edit]);
+
+    $operation_edit = $stmt->fetch(PDO::FETCH_ASSOC);
 }
 ?>
 <!DOCTYPE html>
@@ -493,6 +585,7 @@ if ($est_admin && isset($_GET['editer_operation'])) {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="stylesheet" href="../../assets/css/styles_connected.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
 <style>
 .chart-container {
     background: white;
@@ -520,18 +613,10 @@ if ($est_admin && isset($_GET['editer_operation'])) {
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     border-left: 4px solid var(--primary-color);
 }
-.stat-card.success {
-    border-left-color: var(--success-color);
-}
-.stat-card.danger {
-    border-left-color: var(--danger-color);
-}
-.stat-card.warning {
-    border-left-color: #ffc107;
-}
-.stat-card.info {
-    border-left-color: #17a2b8;
-}
+.stat-card.success { border-left-color: var(--success-color); }
+.stat-card.danger { border-left-color: var(--danger-color); }
+.stat-card.warning { border-left-color: #ffc107; }
+.stat-card.info { border-left-color: #17a2b8; }
 .stat-card h3 {
     font-size: 0.85em;
     color: #666;
@@ -584,11 +669,10 @@ if ($est_admin && isset($_GET['editer_operation'])) {
     font-weight: bold;
     cursor: pointer;
 }
-.close:hover {
-    color: #000;
-}
+.close:hover { color: #000; }
 </style>
 </head>
+
 <body>
 
 <header>
@@ -597,37 +681,43 @@ if ($est_admin && isset($_GET['editer_operation'])) {
             <a href="../dashboard/index.php" class="logo-link">
                 <img src="../../assets/images/logo_epicerie.png" alt="Logo" class="logo-navbar">
             </a>
+
             <a href="../dashboard/index.php" class="nav-link">Tableau de bord</a>
             <a href="../stock/stock.php" class="nav-link">Stock</a>
             <a href="../ventes/ventes.php" class="nav-link">Ventes</a>
             <a href="../clients/clients.php" class="nav-link">Clients</a>
             <a href="../commandes/commandes.php" class="nav-link">Commandes</a>
             <a href="../stock/categories.php" class="nav-link">Catégories</a>
+
             <?php if ($est_admin || $role === 'responsable_approvisionnement'): ?>
                 <a href="../fournisseurs/fournisseurs.php" class="nav-link">Fournisseurs</a>
             <?php endif; ?>
+
             <?php if ($est_admin): ?>
                 <a href="../admin/utilisateurs.php" class="nav-link">Utilisateurs</a>
                 <a href="../admin/demandes_acces.php" class="nav-link">Demandes</a>
             <?php endif; ?>
         </div>
+
         <a href="../auth/logout.php" class="logout">🚪 Déconnexion</a>
     </nav>
 </header>
 
+
 <div class="main-container">
     <div class="content-wrapper">
+
         <h1>💰 Trésorerie</h1>
-        
-        <?php if ($message): ?>
-            <div class="alert <?= strpos($message, '✅') !== false ? 'alert-success' : 'alert-danger' ?>">
+
+        <?php if (!empty($message)): ?>
+            <div class="alert <?= str_contains($message, '✅') ? 'alert-success' : 'alert-danger' ?>">
                 <?= htmlspecialchars($message) ?>
             </div>
         <?php endif; ?>
-
         <?php if ($est_admin): ?>
             <div class="filter-section">
                 <h3 style="margin-top: 0;">📅 Filtres de période</h3>
+
                 <form method="GET" class="filter-group">
                     <select name="periode" class="form-control" style="width: auto;" onchange="this.form.submit()">
                         <option value="jour" <?= $periode === 'jour' ? 'selected' : '' ?>>Aujourd'hui</option>
@@ -636,54 +726,71 @@ if ($est_admin && isset($_GET['editer_operation'])) {
                         <option value="annee" <?= $periode === 'annee' ? 'selected' : '' ?>>Cette année</option>
                         <option value="personnalise" <?= $periode === 'personnalise' ? 'selected' : '' ?>>Personnalisé</option>
                     </select>
+
                     <?php if ($periode === 'personnalise'): ?>
-                        <input type="date" name="date_debut" value="<?= htmlspecialchars($date_debut) ?>" class="form-control" style="width: auto;">
+                        <input type="date" name="date_debut"
+                               value="<?= htmlspecialchars($date_debut) ?>"
+                               class="form-control" style="width: auto;">
                         <span>au</span>
-                        <input type="date" name="date_fin" value="<?= htmlspecialchars($date_fin) ?>" class="form-control" style="width: auto;">
+                        <input type="date" name="date_fin"
+                               value="<?= htmlspecialchars($date_fin) ?>"
+                               class="form-control" style="width: auto;">
                         <button type="submit" class="btn btn-primary">Appliquer</button>
                     <?php endif; ?>
-                    <a href="?export=csv&periode=<?= urlencode($periode) ?>&date_debut=<?= urlencode($date_debut) ?>&date_fin=<?= urlencode($date_fin) ?>" class="btn btn-secondary">📥 Exporter CSV</a>
+
+                    <a href="?export=csv&periode=<?= urlencode($periode) ?>&date_debut=<?= urlencode($date_debut) ?>&date_fin=<?= urlencode($date_fin) ?>"
+                       class="btn btn-secondary">📥 Exporter CSV</a>
                 </form>
             </div>
 
             <div style="margin-bottom: 20px;">
-                <button onclick="document.getElementById('modalOperation').style.display='block'" class="btn btn-primary">➕ Ajouter une opération</button>
+                <button onclick="document.getElementById('modalOperation').style.display='block'"
+                        class="btn btn-primary">➕ Ajouter une opération</button>
             </div>
         <?php endif; ?>
 
         <!-- Résumé financier -->
         <h2>📊 Résumé financier</h2>
+
         <div class="stats-grid">
+
             <div class="stat-card success">
                 <h3>CA du jour</h3>
                 <div class="value"><?= number_format($ca_jour, 2, ',', ' ') ?> €</div>
             </div>
+
             <div class="stat-card success">
                 <h3>CA du mois</h3>
                 <div class="value"><?= number_format($ca_mois, 2, ',', ' ') ?> €</div>
             </div>
+
             <div class="stat-card success">
                 <h3>CA total</h3>
                 <div class="value"><?= number_format($ca_total, 2, ',', ' ') ?> €</div>
             </div>
+
             <div class="stat-card danger">
                 <h3>Total achats fournisseurs</h3>
                 <div class="value"><?= number_format($achats_total, 2, ',', ' ') ?> €</div>
             </div>
+
             <div class="stat-card info">
                 <h3>Marge brute</h3>
                 <div class="value" style="color: <?= $marge_brute >= 0 ? 'var(--success-color)' : 'var(--danger-color)' ?>;">
                     <?= number_format($marge_brute, 2, ',', ' ') ?> €
                 </div>
             </div>
+
             <div class="stat-card <?= $benefice_estime >= 0 ? 'success' : 'danger' ?>">
                 <h3>Bénéfice estimé</h3>
                 <div class="value"><?= number_format($benefice_estime, 2, ',', ' ') ?> €</div>
             </div>
+
             <div class="stat-card danger">
                 <h3>Dépenses diverses</h3>
                 <div class="value"><?= number_format($total_depenses_diverses, 2, ',', ' ') ?> €</div>
             </div>
+
             <?php if ($periode !== 'mois'): ?>
             <div class="stat-card info">
                 <h3>Période sélectionnée</h3>
@@ -694,11 +801,12 @@ if ($est_admin && isset($_GET['editer_operation'])) {
                 </div>
             </div>
             <?php endif; ?>
+
         </div>
 
         <!-- Graphiques -->
         <h2>📈 Graphiques financiers</h2>
-        
+
         <div class="chart-container">
             <div class="chart-title">📈 Évolution des ventes (7 derniers jours)</div>
             <canvas id="chartVentes"></canvas>
@@ -710,17 +818,17 @@ if ($est_admin && isset($_GET['editer_operation'])) {
         </div>
 
         <div class="chart-container">
-            <div class="chart-title">💵 Bénéfice net par période (30 derniers jours)</div>
+            <div class="chart-title">💵 Bénéfice net (30 derniers jours)</div>
             <canvas id="chartBenefices"></canvas>
         </div>
 
         <div class="chart-container">
-            <div class="chart-title">📊 Comparaison Ventes vs Achats (7 derniers jours)</div>
+            <div class="chart-title">📊 Comparaison Ventes / Achats (7 derniers jours)</div>
             <canvas id="chartComparatif"></canvas>
         </div>
-
         <!-- Historique des opérations -->
         <h2>📄 Historique des opérations</h2>
+
         <table>
             <thead>
                 <tr>
@@ -734,58 +842,87 @@ if ($est_admin && isset($_GET['editer_operation'])) {
                 </tr>
             </thead>
             <tbody>
+
                 <?php 
                 $has_data = false;
-                while ($op = (is_object($operations) && method_exists($operations, 'fetch_assoc') ? $operations->fetch_assoc() : mysqli_fetch_assoc($operations))): 
+
+                while ($op = $operations->fetch(PDO::FETCH_ASSOC)): 
                     $has_data = true;
-                    $couleur = in_array($op['type'], ['Vente', 'Entrée']) ? 'var(--success-color)' : 'var(--danger-color)';
+
+                    $couleur = in_array($op['type'], ['Vente', 'Entrée']) 
+                        ? 'var(--success-color)' 
+                        : 'var(--danger-color)';
+
                     $signe = in_array($op['type'], ['Vente', 'Entrée']) ? '+' : '-';
                 ?>
+
                 <tr>
                     <td><?= date('d/m/Y', strtotime($op['date'])) ?></td>
+
                     <td>
                         <span class="badge <?= in_array($op['type'], ['Vente', 'Entrée']) ? 'badge-success' : 'badge-danger' ?>">
                             <?= htmlspecialchars($op['type']) ?>
                         </span>
                     </td>
-                    <td><?= htmlspecialchars($op['libelle']) ?><?= $op['notes'] ? ' <small style="color: #666;">(' . htmlspecialchars($op['notes']) . ')</small>' : '' ?></td>
+
+                    <td>
+                        <?= htmlspecialchars($op['libelle']) ?>
+                        <?= $op['notes'] ? ' <small style="color:#666;">(' . htmlspecialchars($op['notes']) . ')</small>' : '' ?>
+                    </td>
+
                     <td style="color: <?= $couleur ?>; font-weight: bold;">
                         <?= $signe . number_format($op['montant'], 2, ',', ' ') ?> €
                     </td>
-                    <?php if ($est_admin && $op['id_operation']): ?>
-                        <td>
-                            <a href="?editer_operation=<?= $op['id_operation'] ?>&periode=<?= urlencode($periode) ?>" class="btn btn-sm btn-primary">✏️ Modifier</a>
-                            <a href="?supprimer_operation=<?= $op['id_operation'] ?>&periode=<?= urlencode($periode) ?>" 
-                               onclick="return confirm('Êtes-vous sûr de vouloir supprimer cette opération ?')" 
-                               class="btn btn-sm btn-danger">🗑️ Supprimer</a>
-                        </td>
-                    <?php elseif ($est_admin): ?>
-                        <td>-</td>
+
+                    <?php if ($est_admin): ?>
+                        <?php if (!empty($op['id_operation'])): ?>
+                            <td>
+                                <a href="?editer_operation=<?= $op['id_operation'] ?>&periode=<?= urlencode($periode) ?>" 
+                                   class="btn btn-sm btn-primary">✏️ Modifier</a>
+
+                                <a href="?supprimer_operation=<?= $op['id_operation'] ?>&periode=<?= urlencode($periode) ?>"
+                                   onclick="return confirm('Êtes-vous sûr de vouloir supprimer cette opération ?')"
+                                   class="btn btn-sm btn-danger">🗑️ Supprimer</a>
+                            </td>
+                        <?php else: ?>
+                            <td>-</td>
+                        <?php endif; ?>
                     <?php endif; ?>
+
                 </tr>
+
                 <?php endwhile; ?>
+
                 <?php if (!$has_data): ?>
                 <tr>
-                    <td colspan="<?= $est_admin ? '5' : '4' ?>" style="text-align: center; padding: 20px; color: #666;">
+                    <td colspan="<?= $est_admin ? '5' : '4' ?>" style="text-align:center; padding:20px; color:#666;">
                         Aucune opération pour cette période.
                     </td>
                 </tr>
                 <?php endif; ?>
+
             </tbody>
         </table>
     </div>
 </div>
 
-<!-- Modal pour ajouter/modifier une opération (Admin uniquement) -->
+<!-- Modal ajouter/modifier une opération -->
 <?php if ($est_admin): ?>
+
 <div id="modalOperation" class="modal" style="<?= $operation_edit ? 'display:block;' : '' ?>">
     <div class="modal-content">
-        <span class="close" onclick="document.getElementById('modalOperation').style.display='none'">&times;</span>
+
+        <span class="close"
+              onclick="document.getElementById('modalOperation').style.display='none'">&times;</span>
+
         <h2><?= $operation_edit ? '✏️ Modifier une opération' : '➕ Ajouter une opération' ?></h2>
+
         <form method="POST">
+
             <?php if ($operation_edit): ?>
                 <input type="hidden" name="id_operation" value="<?= $operation_edit['id'] ?>">
             <?php endif; ?>
+
             <div class="form-group">
                 <label>Type d'opération *</label>
                 <select name="type_operation" class="form-control" required>
@@ -793,141 +930,117 @@ if ($est_admin && isset($_GET['editer_operation'])) {
                     <option value="entree" <?= $operation_edit && $operation_edit['type_operation'] === 'entree' ? 'selected' : '' ?>>💰 Entrée</option>
                 </select>
             </div>
+
             <div class="form-group">
                 <label>Libellé *</label>
-                <input type="text" name="libelle" class="form-control" value="<?= $operation_edit ? htmlspecialchars($operation_edit['libelle']) : '' ?>" required placeholder="Ex: Loyer, Électricité, Vente occasionnelle...">
+                <input type="text" name="libelle" class="form-control"
+                       value="<?= $operation_edit ? htmlspecialchars($operation_edit['libelle']) : '' ?>"
+                       required>
             </div>
+
             <div class="form-group">
                 <label>Montant (€) *</label>
-                <input type="number" name="montant" class="form-control" step="0.01" min="0.01" value="<?= $operation_edit ? $operation_edit['montant'] : '' ?>" required>
+                <input type="number" name="montant" class="form-control" step="0.01" min="0.01"
+                       value="<?= $operation_edit ? $operation_edit['montant'] : '' ?>" required>
             </div>
+
             <div class="form-group">
                 <label>Notes (optionnel)</label>
-                <textarea name="notes" class="form-control" rows="3" placeholder="Informations complémentaires..."><?= $operation_edit ? htmlspecialchars($operation_edit['notes'] ?? '') : '' ?></textarea>
+                <textarea name="notes" class="form-control" rows="3"><?= $operation_edit ? htmlspecialchars($operation_edit['notes']) : '' ?></textarea>
             </div>
+
             <div class="form-group">
-                <button type="submit" name="<?= $operation_edit ? 'modifier_operation' : 'ajouter_operation' ?>" class="btn btn-primary">
-                    <?= $operation_edit ? '💾 Enregistrer les modifications' : '✅ Ajouter l\'opération' ?>
+                <button type="submit"
+                        name="<?= $operation_edit ? 'modifier_operation' : 'ajouter_operation' ?>"
+                        class="btn btn-primary">
+                    <?= $operation_edit ? '💾 Enregistrer' : '✅ Ajouter' ?>
                 </button>
+
                 <a href="tresorerie.php?periode=<?= urlencode($periode) ?>" class="btn btn-secondary">Annuler</a>
             </div>
+
         </form>
     </div>
 </div>
-<?php endif; ?>
 
+<?php endif; ?>
 <script>
-// Graphique évolution des ventes
-const ctxVentes = document.getElementById('chartVentes').getContext('2d');
-new Chart(ctxVentes, {
+// Graphique ventes
+new Chart(document.getElementById('chartVentes'), {
     type: 'line',
     data: {
         labels: <?= json_encode($labels_ventes) ?>,
         datasets: [{
-            label: 'Ventes (€)',
+            label: "Ventes (€)",
             data: <?= json_encode($data_ventes) ?>,
-            borderColor: 'rgb(40, 167, 69)',
-            backgroundColor: 'rgba(40, 167, 69, 0.1)',
-            tension: 0.4,
+            borderColor: "rgb(40, 167, 69)",
+            backgroundColor: "rgba(40,167,69,0.15)",
+            tension: 0.3,
             fill: true
         }]
-    },
-    options: {
-        responsive: true,
-        scales: {
-            y: {
-                beginAtZero: true
-            }
-        }
     }
 });
 
-// Graphique évolution des achats
-const ctxAchats = document.getElementById('chartAchats').getContext('2d');
-new Chart(ctxAchats, {
+// Graphique achats
+new Chart(document.getElementById('chartAchats'), {
     type: 'bar',
     data: {
         labels: <?= json_encode($dates_achats) ?>,
         datasets: [{
-            label: 'Achats (€)',
+            label: "Achats (€)",
             data: <?= json_encode($data_achats) ?>,
-            backgroundColor: 'rgba(220, 53, 69, 0.7)',
-            borderColor: 'rgb(220, 53, 69)',
+            backgroundColor: "rgba(220,53,69,0.6)",
+            borderColor: "rgb(220,53,69)",
             borderWidth: 1
         }]
-    },
-    options: {
-        responsive: true,
-        scales: {
-            y: {
-                beginAtZero: true
-            }
-        }
     }
 });
 
 // Graphique bénéfices
-const ctxBenefices = document.getElementById('chartBenefices').getContext('2d');
-new Chart(ctxBenefices, {
+new Chart(document.getElementById('chartBenefices'), {
     type: 'line',
     data: {
         labels: <?= json_encode($labels_benefices) ?>,
         datasets: [{
-            label: 'Bénéfice net (€)',
+            label: "Bénéfice Net (€)",
             data: <?= json_encode($data_benefices) ?>,
-            borderColor: 'rgb(23, 162, 184)',
-            backgroundColor: 'rgba(23, 162, 184, 0.1)',
-            tension: 0.4,
+            borderColor: "rgb(23,162,184)",
+            backgroundColor: "rgba(23,162,184,0.15)",
+            tension: 0.3,
             fill: true
         }]
-    },
-    options: {
-        responsive: true,
-        scales: {
-            y: {
-                beginAtZero: false
-            }
-        }
     }
 });
 
-// Graphique comparatif
-const ctxComparatif = document.getElementById('chartComparatif').getContext('2d');
-new Chart(ctxComparatif, {
-    type: 'bar',
+// Comparatif ventes vs achats
+new Chart(document.getElementById('chartComparatif'), {
+    type: "bar",
     data: {
         labels: <?= json_encode($all_dates) ?>,
-        datasets: [{
-            label: 'Ventes (€)',
-            data: <?= json_encode($data_ventes_complete) ?>,
-            backgroundColor: 'rgba(40, 167, 69, 0.7)',
-            borderColor: 'rgb(40, 167, 69)',
-            borderWidth: 1
-        }, {
-            label: 'Achats (€)',
-            data: <?= json_encode($data_achats_complete) ?>,
-            backgroundColor: 'rgba(220, 53, 69, 0.7)',
-            borderColor: 'rgb(220, 53, 69)',
-            borderWidth: 1
-        }]
-    },
-    options: {
-        responsive: true,
-        scales: {
-            y: {
-                beginAtZero: true
+        datasets: [
+            {
+                label: "Ventes (€)",
+                data: <?= json_encode($data_ventes_complete) ?>,
+                backgroundColor: "rgba(40,167,69,0.6)",
+                borderColor: "rgb(40,167,69)",
+                borderWidth: 1
+            },
+            {
+                label: "Achats (€)",
+                data: <?= json_encode($data_achats_complete) ?>,
+                backgroundColor: "rgba(220,53,69,0.6)",
+                borderColor: "rgb(220,53,69)",
+                borderWidth: 1
             }
-        }
+        ]
     }
 });
 
-// Fermer la modal en cliquant en dehors
-window.onclick = function(event) {
-    const modal = document.getElementById('modalOperation');
-    if (event.target == modal) {
-        modal.style.display = "none";
-    }
-}
+// Fermeture modale
+window.onclick = function(e) {
+    const modal = document.getElementById("modalOperation");
+    if (e.target === modal) modal.style.display = "none";
+};
 </script>
 
 </body>

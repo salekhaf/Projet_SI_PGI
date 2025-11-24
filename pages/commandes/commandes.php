@@ -5,72 +5,119 @@ if (!isset($_SESSION['id_utilisateur'])) {
     exit();
 }
 
-include('../../config/db_conn.php');
+include('../../config/db_conn.php'); // Fournit $pdo au lieu de mysqli
 
 $role = $_SESSION['role'];
 $id_user = $_SESSION['id_utilisateur'];
 $message = "";
 
-// Vérifier si l'utilisateur peut passer des commandes
+// Vérifier si l'utilisateur peut gérer les commandes
 $peut_commander = in_array($role, ['admin', 'responsable_approvisionnement']);
 
-// --- AJOUT D'UNE COMMANDE ---
+/*************************************************
+ * 1 — AJOUT D’UNE COMMANDE
+ *************************************************/
 if ($peut_commander && isset($_POST['ajouter'])) {
-    $id_fournisseur = intval($_POST['id_fournisseur']);
-    $produits = $_POST['produit_id'];
-    $quantites = $_POST['quantite'];
-    $prix_achats = $_POST['prix_achat'];
-    $total_general = 0;
+    try {
+        $pdo->beginTransaction();
 
-    foreach ($produits as $i => $id_produit) {
-        $qte = intval($quantites[$i]);
-        $prix = floatval($prix_achats[$i]);
-        $total_general += $prix * $qte;
-    }
+        $id_fournisseur = intval($_POST['id_fournisseur']);
+        $produits = $_POST['produit_id'];
+        $quantites = $_POST['quantite'];
+        $prix_achats = $_POST['prix_achat'];
+        $total_general = 0;
 
-    // Insertion dans la table "achats"
-    $sql_achat = "INSERT INTO achats (id_fournisseur, date_achat, montant_total) 
-                  VALUES ($id_fournisseur, NOW(), $total_general)";
-    if ($conn->query($sql_achat)) {
-        $id_achat = db_get_insert_id($conn);
-
-        // Insertion dans "details_achat" et mise à jour du stock
-        foreach ($produits as $i => $id_produit) {
-            $id_produit = intval($id_produit);
-            $qte = intval($quantites[$i]);
+        foreach ($produits as $i => $p) {
+            $quantite = intval($quantites[$i]);
             $prix = floatval($prix_achats[$i]);
-            if ($id_produit > 0 && $qte > 0) {
-                $conn->query("INSERT INTO details_achat (id_achat, id_produit, quantite, prix_achat)
-                                     VALUES ($id_achat, $id_produit, $qte, $prix)");
-                $conn->query("UPDATE produits 
-                                     SET quantite_stock = quantite_stock + $qte,
-                                         prix_achat = $prix
-                                     WHERE id = $id_produit");
+
+            if ($quantite > 0 && $prix > 0) {
+                $total_general += $quantite * $prix;
             }
         }
+
+        // Insert achat
+        $stmt = $pdo->prepare("INSERT INTO achats (id_fournisseur, date_achat, montant_total) 
+                               VALUES (:f, NOW(), :montant) RETURNING id");
+        $stmt->execute([
+            ':f' => $id_fournisseur,
+            ':montant' => $total_general
+        ]);
+        $id_achat = $stmt->fetchColumn();
+
+        // Insert détails + mise à jour stock
+        $stmt_detail = $pdo->prepare("
+            INSERT INTO details_achat (id_achat, id_produit, quantite, prix_achat)
+            VALUES (:id_achat, :id_produit, :qty, :prix)
+        ");
+
+        $stmt_stock = $pdo->prepare("
+            UPDATE produits
+            SET quantite_stock = quantite_stock + :qty,
+                prix_achat = :prix
+            WHERE id = :id_prod
+        ");
+
+        foreach ($produits as $i => $id_produit) {
+            $id_produit = intval($id_produit);
+            $quantite = intval($quantites[$i]);
+            $prix = floatval($prix_achats[$i]);
+
+            if ($id_produit > 0 && $quantite > 0) {
+                $stmt_detail->execute([
+                    ':id_achat' => $id_achat,
+                    ':id_produit' => $id_produit,
+                    ':qty' => $quantite,
+                    ':prix' => $prix
+                ]);
+
+                $stmt_stock->execute([
+                    ':qty' => $quantite,
+                    ':prix' => $prix,
+                    ':id_prod' => $id_produit
+                ]);
+            }
+        }
+
+        $pdo->commit();
         $message = "✅ Commande enregistrée avec succès.";
-    } else {
-        $message = "❌ Erreur lors de l'enregistrement : " . (isset($GLOBALS['is_postgresql']) && is_object($conn) && get_class($conn) === 'PostgreSQLConnection' ? $conn->error() : mysqli_error($conn));
+
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        $message = "❌ Erreur : " . $e->getMessage();
     }
 }
 
-// --- SUPPRESSION D'UNE COMMANDE ---
+/*************************************************
+ * 2 — SUPPRESSION D’UNE COMMANDE
+ *************************************************/
 if ($peut_commander && isset($_GET['supprimer'])) {
     $id = intval($_GET['supprimer']);
-    $conn->query("DELETE FROM achats WHERE id = $id");
+
+    $stmt = $pdo->prepare("DELETE FROM achats WHERE id=:id");
+    $stmt->execute([':id' => $id]);
+
     header("Location: commandes.php");
     exit();
 }
 
-// --- LISTES ---
-$fournisseurs = $conn->query("SELECT id, nom FROM fournisseurs ORDER BY nom ASC");
-$produits = $conn->query("SELECT id, nom, prix_achat FROM produits ORDER BY nom ASC");
-$achats = $conn->query("
+/*************************************************
+ * 3 — LISTE DES FOURNISSEURS, PRODUITS, COMMANDES
+ *************************************************/
+
+// Fournisseurs
+$fournisseurs = $pdo->query("SELECT id, nom FROM fournisseurs ORDER BY nom ASC")->fetchAll(PDO::FETCH_ASSOC);
+
+// Produits
+$produits = $pdo->query("SELECT id, nom, prix_achat FROM produits ORDER BY nom ASC")->fetchAll(PDO::FETCH_ASSOC);
+
+// Commandes
+$achats = $pdo->query("
     SELECT a.id, a.date_achat, a.montant_total, f.nom AS fournisseur
     FROM achats a
     JOIN fournisseurs f ON a.id_fournisseur = f.id
     ORDER BY a.id DESC
-");
+")->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="fr">
@@ -83,8 +130,7 @@ $achats = $conn->query("
 function updateTotal(row) {
     const prix = parseFloat(row.querySelector('.prix').value) || 0;
     const qte = parseInt(row.querySelector('.qte').value) || 0;
-    const total = prix * qte;
-    row.querySelector('.total-cell').textContent = total.toFixed(2) + " €";
+    row.querySelector('.total-cell').textContent = (prix * qte).toFixed(2) + " €";
     updateGrandTotal();
 }
 
@@ -133,122 +179,105 @@ function setPrix(select) {
 
 <div class="main-container">
     <div class="content-wrapper">
+
 <h1>📦 Commandes fournisseurs</h1>
-        
-        <p style="margin-bottom: 25px;">
-            <a href="../dashboard/index.php" class="btn btn-secondary">⬅️ Retour au tableau de bord</a>
-        </p>
 
-        <?php if ($message): ?>
-            <div class="message <?= strpos($message, '✅') !== false ? 'success' : 'error' ?>">
-                <?= $message ?>
-            </div>
-        <?php endif; ?>
+<?php if ($message): ?>
+    <div class="message <?= strpos($message, '✅') !== false ? 'success' : 'error' ?>">
+        <?= $message ?>
+    </div>
+<?php endif; ?>
 
-        <?php if (!$peut_commander): ?>
-            <div class="message warning">
-                ℹ️ <strong>Mode consultation</strong> : Vous pouvez consulter les commandes mais vous n'avez pas les droits pour en créer ou modifier. 
-                Seuls les <strong>admins</strong> et <strong>responsables approvisionnement</strong> peuvent gérer les commandes.
-            </div>
-        <?php endif; ?>
+<?php if (!$peut_commander): ?>
+<div class="message warning">
+    ℹ️ Mode consultation uniquement.  
+</div>
+<?php endif; ?>
 
 <?php if ($peut_commander): ?>
-        <h3>➕ Nouvelle commande</h3>
+<h3>➕ Nouvelle commande</h3>
+
 <form method="POST">
-            <div class="form-group">
-    <label>Fournisseur :</label>
-    <select name="id_fournisseur" required>
-        <option value="">-- Sélectionner un fournisseur --</option>
-        <?php while ($f = (is_object($fournisseurs) && method_exists($fournisseurs, 'fetch_assoc') ? $fournisseurs->fetch_assoc() : mysqli_fetch_assoc($fournisseurs))): ?>
+    <div class="form-group">
+        <label>Fournisseur :</label>
+        <select name="id_fournisseur" required>
+            <option value="">-- Sélectionner --</option>
+            <?php foreach($fournisseurs as $f): ?>
             <option value="<?= $f['id'] ?>"><?= htmlspecialchars($f['nom']) ?></option>
-        <?php endwhile; ?>
-    </select>
-            </div>
+            <?php endforeach; ?>
+        </select>
+    </div>
 
     <table id="table_produits">
-                <thead>
-                    <tr>
-                        <th>Produit</th>
-                        <th>Prix achat (€)</th>
-                        <th>Quantité</th>
-                        <th>Total (€)</th>
-                    </tr>
-                </thead>
-                <tbody>
-        <tr>
-            <td>
-                            <select name="produit_id[]" onchange="setPrix(this)" style="width: 100%; padding: 10px; border-radius: 8px; border: 2px solid #e0e0e0;">
-                    <option value="">-- Choisir un produit --</option>
-                    <?php
-                    mysqli_data_seek($produits, 0);
-                    while ($p = (is_object($produits) && method_exists($produits, 'fetch_assoc') ? $produits->fetch_assoc() : mysqli_fetch_assoc($produits))): ?>
+        <thead>
+            <tr>
+                <th>Produit</th>
+                <th>Prix achat (€)</th>
+                <th>Quantité</th>
+                <th>Total (€)</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>
+                    <select name="produit_id[]" onchange="setPrix(this)">
+                        <option value="">-- Choisir --</option>
+                        <?php foreach($produits as $p): ?>
                         <option value="<?= $p['id'] ?>" data-prix="<?= $p['prix_achat'] ?>">
                             <?= htmlspecialchars($p['nom']) ?>
                         </option>
-                    <?php endwhile; ?>
-                </select>
-            </td>
-                        <td>
-                            <input type="number" class="prix" name="prix_achat[]" step="0.01" oninput="updateTotal(this.closest('tr'))" style="width: 100%;">
-                        </td>
-                        <td>
-                            <input type="number" class="qte" name="quantite[]" min="1" value="1" oninput="updateTotal(this.closest('tr'))" style="width: 100%;">
-                        </td>
-                        <td class="total-cell" style="font-weight: bold; color: var(--primary-color);">0.00 €</td>
-        </tr>
-                </tbody>
+                        <?php endforeach; ?>
+                    </select>
+                </td>
+                <td><input type="number" class="prix" name="prix_achat[]" step="0.01" oninput="updateTotal(this.closest('tr'))"></td>
+                <td><input type="number" class="qte" name="quantite[]" min="1" value="1" oninput="updateTotal(this.closest('tr'))"></td>
+                <td class="total-cell">0.00 €</td>
+            </tr>
+        </tbody>
     </table>
 
-            <p style="margin-top: 15px;">
-                <button type="button" onclick="ajouterLigne()" class="btn btn-info">➕ Ajouter un produit</button>
-            </p>
-            <div style="text-align: right; font-weight: bold; font-size: 1.2em; margin: 20px 0; color: var(--primary-color);">
-                Total général : <span id="grand_total">0.00 €</span>
-            </div>
-            <button type="submit" name="ajouter" class="btn">✅ Enregistrer la commande</button>
+    <button type="button" onclick="ajouterLigne()" class="btn btn-info">➕ Ajouter un produit</button>
+
+    <div style="margin-top:20px;font-weight:bold;">
+        Total général : <span id="grand_total">0.00 €</span>
+    </div>
+
+    <button type="submit" name="ajouter" class="btn">Enregistrer</button>
 </form>
-<?php else: ?>
-            <div class="message warning">
-                ⚠️ Vous n'avez pas les droits pour créer ou supprimer des commandes.
-            </div>
 <?php endif; ?>
 
-        <h3>📋 Liste des commandes</h3>
+<h3>📋 Liste des commandes</h3>
+
 <table>
-            <thead>
-<tr>
-    <th>ID</th>
-    <th>Fournisseur</th>
-    <th>Date</th>
-    <th>Total (€)</th>
-    <th>Détails</th>
-    <?php if ($peut_commander): ?><th>Action</th><?php endif; ?>
-</tr>
-            </thead>
-            <tbody>
-<?php while ($a = (is_object($achats) && method_exists($achats, 'fetch_assoc') ? $achats->fetch_assoc() : mysqli_fetch_assoc($achats))): ?>
-<tr>
-    <td><?= $a['id'] ?></td>
-    <td><?= htmlspecialchars($a['fournisseur']) ?></td>
-                    <td><?= date('d/m/Y H:i', strtotime($a['date_achat'])) ?></td>
-                    <td style="font-weight: bold; color: var(--primary-color);">
-                        <?= number_format($a['montant_total'], 2, ',', ' ') ?> €
-                    </td>
-    <td>
-                        <a href="detailCommande.php?id=<?= $a['id'] ?>" class="btn btn-info btn-sm">🔍 Voir</a>
-                        <a href="bonCommande.php?id=<?= $a['id'] ?>" class="btn btn-success btn-sm">📄 PDF</a>
-    </td>
-    <?php if ($peut_commander): ?>
-                        <td>
-                            <a href="?supprimer=<?= $a['id'] ?>" class="btn btn-danger btn-sm" onclick="return confirm('Êtes-vous sûr de vouloir supprimer cette commande ?')">
-                                🗑️ Supprimer
-                            </a>
-                        </td>
-    <?php endif; ?>
-</tr>
-<?php endwhile; ?>
-            </tbody>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Fournisseur</th>
+            <th>Date</th>
+            <th>Total</th>
+            <th>Détails</th>
+            <?php if ($peut_commander): ?><th>Action</th><?php endif; ?>
+        </tr>
+    </thead>
+    <tbody>
+        <?php foreach($achats as $a): ?>
+        <tr>
+            <td><?= $a['id'] ?></td>
+            <td><?= htmlspecialchars($a['fournisseur']) ?></td>
+            <td><?= date('d/m/Y H:i', strtotime($a['date_achat'])) ?></td>
+            <td><?= number_format($a['montant_total'], 2, ',', ' ') ?> €</td>
+            <td>
+                <a href="detailCommande.php?id=<?= $a['id'] ?>" class="btn btn-info btn-sm">🔍 Voir</a>
+                <a href="bonCommande.php?id=<?= $a['id'] ?>" class="btn btn-success btn-sm">📄 PDF</a>
+            </td>
+            <?php if ($peut_commander): ?>
+            <td><a href="?supprimer=<?= $a['id'] ?>" class="btn btn-danger btn-sm" onclick="return confirm('Supprimer ?')">🗑️</a></td>
+            <?php endif; ?>
+        </tr>
+        <?php endforeach; ?>
+    </tbody>
 </table>
+
 </div>
 </div>
 
