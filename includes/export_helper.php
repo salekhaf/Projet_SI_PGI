@@ -1,29 +1,38 @@
 <?php
-// Fonction pour exporter en Excel (format CSV avec en-têtes Excel)
-function export_excel($conn, $query, $filename, $headers) {
-    header('Content-Type: application/vnd.ms-excel; charset=utf-8');
-    header('Content-Disposition: attachment; filename="' . $filename . '.xls"');
+/**
+ * EXPORT EXCEL via PDO
+ * Génère un vrai fichier Excel compatible (format html/table)
+ * fonctionne pour MySQL & PostgreSQL
+ */
+
+function export_excel_pdo(PDO $pdo, string $query, array $params, string $filename, array $headers)
+{
+    header("Content-Type: application/vnd.ms-excel; charset=utf-8");
+    header("Content-Disposition: attachment; filename=\"{$filename}.xls\"");
     
-    echo '<table border="1">';
-    echo '<tr>';
-    foreach ($headers as $header) {
-        echo '<th>' . htmlspecialchars($header) . '</th>';
+    echo "<table border='1'>";
+
+    // Entêtes
+    echo "<tr>";
+    foreach ($headers as $h) {
+        echo "<th>" . htmlspecialchars($h) . "</th>";
     }
-    echo '</tr>';
-    
-    $result = $conn->query($query);
-    while ($row = (is_object($result) && method_exists($result, 'fetch_assoc') ? $result->fetch_assoc() : mysqli_fetch_assoc($result))) {
-        echo '<tr>';
+    echo "</tr>";
+
+    // Exécution
+    $stmt = $pdo->prepare($query);
+    $stmt->execute($params);
+
+    // Lignes
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        echo "<tr>";
         foreach ($row as $cell) {
-            echo '<td>' . htmlspecialchars($cell) . '</td>';
+            echo "<td>" . htmlspecialchars($cell ?? '') . "</td>";
         }
-        echo '</tr>';
+        echo "</tr>";
     }
-    echo '</table>';
-    exit();
+
+    echo "</table>";
+    exit;
 }
 ?>
-
-
-
-
